@@ -1,0 +1,36 @@
+FROM ubuntu:20.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY libiec61850 ./libiec61850
+COPY src/protection-relay.c ./
+COPY src/static_model.c ./
+COPY src/static_model.h ./
+
+RUN cd libiec61850 && \
+    mkdir build && cd build && \
+    cmake .. && \
+    make
+
+RUN gcc -o protection-relay protection-relay.c static_model.c \
+    -I./libiec61850/src/iec61850/inc \
+    -I./libiec61850/src/common/inc \
+    -I./libiec61850/hal/inc \
+    -I./libiec61850/src/mms/inc \
+    -I./libiec61850/src/goose \
+    -I./libiec61850/src/r_session \
+    -I./libiec61850/src/logging \
+    ./libiec61850/build/src/libiec61850.a \
+    ./libiec61850/build/hal/libhal.a \
+    -lpthread -lm
+
+EXPOSE 102 8082
+CMD ["./protection-relay"]

@@ -1,0 +1,89 @@
+services:
+  protection-relay:
+    build:
+      context: .
+      dockerfile: config/Dockerfile.protection-relay
+    container_name: protection_relay_ied
+    networks:
+      - process_bus
+    ports:
+      - "102:102"
+      - "8082:8082"
+    privileged: true
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+      - NET_BROADCAST
+    environment:
+      - GOOSE_INTERFACE=eth0
+      - MMS_PORT=102
+      - SIMULATOR_HOST=substation_web_ui
+    volumes:
+      - ./logs:/app/logs
+
+  circuit-breaker:
+    build:
+      context: .
+      dockerfile: config/Dockerfile.circuit-breaker
+    container_name: circuit_breaker_ied
+    networks:
+      - process_bus
+    ports:
+      - "8081:8081"
+      - "103:103"
+    privileged: true
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+      - NET_BROADCAST
+    environment:
+      - GOOSE_INTERFACE=eth0
+    command: ["./circuit-breaker", "eth0"]
+    depends_on:
+      - protection-relay
+    volumes:
+      - ./logs:/app/logs
+
+  hmi-scada:
+    build:
+      context: .
+      dockerfile: config/Dockerfile.hmi-scada
+    container_name: hmi_scada
+    networks:
+      - process_bus
+    ports:
+      - "8080:8080"
+    environment:
+      - RELAY_HOST=protection_relay_ied
+      - MMS_PORT=102
+    depends_on:
+      - protection-relay
+    volumes:
+      - ./logs:/app/logs
+
+  web-interface:
+    build:
+      context: ./web-interface
+    container_name: substation_web_ui
+    networks:
+      - process_bus
+      - station_bus
+    ports:
+      - "3000:3000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - protection-relay
+      - circuit-breaker
+
+networks:
+  process_bus:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.10.0/24
+  station_bus:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.20.0/24

@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SCADA - Substation Control System</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; background: #2c2c2c; color: #fff; overflow: hidden; margin: 0; }
+        
+        .scada-header { background: #1a1a1a; color: #00ff00; padding: 5px 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #00ff00; font-family: 'Courier New', monospace; }
+        .logo { font-size: 16px; font-weight: bold; }
+        .system-time { font-size: 12px; color: #ffff00; }
+        
+        .alarm-bar { background: #ff0000; color: #fff; padding: 3px 15px; font-size: 11px; font-weight: bold; text-align: center; animation: blink 1s infinite; display: none; }
+        @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0.3; } }
+        
+        .main-scada { background: #2c2c2c; height: calc(100vh - 40px); position: relative; overflow: hidden; }
+        
+        /* SCADA Elements */
+        .busbar { position: absolute; background: #ffff00; height: 6px; box-shadow: 0 0 10px #ffff00; }
+        .line { position: absolute; background: #00ff00; }
+        .line-vertical { width: 3px; }
+        .line-horizontal { height: 3px; }
+        
+        .breaker-symbol { position: absolute; width: 30px; height: 20px; background: #666; border: 2px solid #999; cursor: pointer; }
+        .breaker-symbol.closed::after { content: ''; position: absolute; top: 8px; left: 5px; width: 18px; height: 2px; background: #00ff00; }
+        .breaker-symbol.open::after { content: ''; position: absolute; top: 8px; left: 5px; width: 8px; height: 2px; background: #ff0000; }
+        
+        .relay-symbol { position: absolute; width: 25px; height: 25px; background: #4a4a4a; border: 2px solid #999; border-radius: 3px; display: flex; align-items: center; justify-content: center; color: #00ff00; font-size: 10px; font-weight: bold; cursor: pointer; }
+        
+        .transformer-symbol { position: absolute; width: 40px; height: 40px; color: #00ff00; font-size: 30px; cursor: pointer; }
+        .transformer-symbol::before { content: '○'; }
+        .transformer-symbol::after { content: '○'; font-size: 25px; position: absolute; margin-left: 15px; margin-top: 5px; }
+        
+        /* Faceplates */
+        .faceplate { position: absolute; background: linear-gradient(145deg, #404040, #2a2a2a); border: 2px solid #666; border-radius: 8px; padding: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); font-family: 'Courier New', monospace; z-index: 100; }
+        .faceplate-header { background: #1a1a1a; color: #00ff00; padding: 3px 8px; margin: -10px -10px 8px -10px; border-radius: 6px 6px 0 0; font-size: 11px; font-weight: bold; text-align: center; }
+        .faceplate-row { display: flex; justify-content: space-between; margin: 3px 0; font-size: 10px; }
+        .faceplate-label { color: #ccc; }
+        .faceplate-value { color: #00ff00; font-weight: bold; min-width: 60px; text-align: right; }
+        .alarm-value { color: #ff0000; animation: blink 0.5s infinite; }
+        .warning-value { color: #ffff00; }
+        
+        .breaker-faceplate { width: 120px; }
+        .relay-faceplate { width: 140px; }
+        
+        .status-indicator { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        .status-ok { background: #00ff00; box-shadow: 0 0 5px #00ff00; }
+        .status-alarm { background: #ff0000; box-shadow: 0 0 5px #ff0000; }
+        .status-warning { background: #ffff00; box-shadow: 0 0 5px #ffff00; }
+        
+        .status-bar { background: #1a1a1a; color: #00ff00; padding: 3px 15px; border-top: 1px solid #666; font-size: 10px; display: flex; justify-content: space-between; font-family: 'Courier New', monospace; position: fixed; bottom: 0; width: 100%; }
+        
+        .button { background: #4a4a4a; border: 1px solid #666; color: #00ff00; padding: 2px 6px; font-size: 9px; cursor: pointer; margin: 2px 0; }
+        .button:hover { background: #5a5a5a; }
+        .button.active { background: #00ff00; color: #000; }
+    </style>
+</head>
+<body>
+    <div class="scada-header">
+        <div class="logo">SCADA - MAIN_SS_132kV</div>
+        <div class="system-info">
+            <span>USER: OPERATOR | </span>
+            <span class="system-time" id="system-time"></span>
+        </div>
+    </div>
+    
+    <div class="alarm-bar" id="alarm-bar">
+        ⚠️ SYSTEM ALARM - FAULT DETECTED IN BAY LINE_01 ⚠️
+    </div>
+    
+    <div class="main-scada">
+        <!-- 132kV Busbar -->
+        <div class="busbar" style="top: 200px; left: 100px; width: 800px;"></div>
+        
+        <!-- Incoming Line -->
+        <div class="line line-vertical" style="top: 50px; left: 248px; height: 150px;"></div>
+        <div class="line line-horizontal" style="top: 50px; left: 200px; width: 100px;"></div>
+        
+        <!-- Circuit Breaker CB-01 -->
+        <div class="breaker-symbol closed" id="cb-01" style="top: 190px; left: 235px;" onclick="showFaceplate('cb-faceplate')"></div>
+        
+        <!-- Protection Relay -->
+        <div class="relay-symbol" id="relay-01" style="top: 250px; left: 300px;" onclick="showFaceplate('relay-faceplate')">R1</div>
+        
+        <!-- Transformer -->
+        <div class="transformer-symbol" style="top: 300px; left: 500px;" onclick="showFaceplate('trafo-faceplate')"></div>
+        <div class="line line-vertical" style="top: 206px; left: 518px; height: 94px;"></div>
+        <div class="line line-vertical" style="top: 340px; left: 518px; height: 50px;"></div>
+        
+        <!-- Outgoing Lines -->
+        <div class="line line-vertical" style="top: 206px; left: 398px; height: 80px;"></div>
+        <div class="line line-horizontal" style="top: 286px; left: 400px; width: 100px;"></div>
+        
+        <div class="line line-vertical" style="top: 206px; left: 698px; height: 80px;"></div>
+        <div class="line line-horizontal" style="top: 286px; left: 700px; width: 100px;"></div>
+        
+        <!-- Circuit Breaker Faceplate -->
+        <div class="faceplate breaker-faceplate" id="cb-faceplate" style="top: 100px; left: 50px; display: none;">
+            <div class="faceplate-header">CB_LINE_01_001</div>
+            <div class="faceplate-row">
+                <span class="faceplate-label">Position:</span>
+                <span class="faceplate-value" id="cb-position">CLOSED</span>
+            </div>
+            <div class="faceplate-row">
+                <span class="faceplate-label">Status:</span>
+                <span class="faceplate-value" id="cb-status"><span class="status-indicator status-ok"></span>NORMAL</span>
+            </div>
+            <div class="faceplate-row">
+                <span class="faceplate-label">Trip Coil:</span>
+                <span class="faceplate-value" id="cb-trip">HEALTHY</span>
+            </div>
+            <div class="faceplate-row">
+                <span class="faceplate-label">Close Coil:</span>
+                <span class="faceplate-value">HEALTHY</span>
+            </div>
+            <div class="faceplate-row">
+                <span class="faceplate-label">SF6 Press:</span>
+                <span class="faceplate-value">6.2 bar</span>
+            </div>
+            <button class="button" onclick="sendCommand('TRIP')">TRIP</button>
+            <button class="button" onclick="sendCommand('CLOSE')">CLOSE</button>
+        </div>
+        
+        <!-- Protection Relay Faceplate -->
+        <div class="faceplate relay-faceplate" id="relay-faceplate" style="top: 100px; left: 200px; display: none;">
+            <div class="faceplate-header">PROT_REL_001</div>
+            <div class="faceplate-row">
+                <span class="faceplate-label">Voltage L1:</span>
+                <span class="faceplate-value" id="relay-voltage">132.0 kV</span>
+            </div>
+            <div class="faceplate-row">
+                <span class="faceplate-label">Current L1:</span>
+                <span class="faceplate-value" id="relay-current">450 A</span>
+            </div>
+            <div class="faceplate-row">
+                <span class="faceplate-label">Frequency:</span>
+                <span class="faceplate-value" id="relay-frequency">50.00 Hz</span>
+            </div>
+            <div class="faceplate-row">
+                <span class="faceplate-label">Fault I:</span>
+                <span class="faceplate-value" id="relay-fault-current">0 A</span>
+            </div>
+            <div class="faceplate-row">
+                <span class="faceplate-label">Trip Cmd:</span>
+                <span class="faceplate-value" id="relay-trip">FALSE</span>
+            </div>
+            <div class="faceplate-row">
+                <span class="faceplate-label">Fault Det:</span>
+                <span class="faceplate-value" id="relay-fault">FALSE</span>
+            </div>
+            <div class="faceplate-row">
+                <span class="faceplate-label">MMS Conn:</span>
+                <span class="faceplate-value"><span class="status-indicator status-ok"></span>ONLINE</span>
+            </div>
+            <button class="button" onclick="resetRelay()">RESET</button>
+            <button class="button" onclick="testRelay()">TEST</button>
+        </div>
+        
+        <!-- Transformer Faceplate -->
+        <div class="faceplate" id="trafo-faceplate" style="top: 100px; left: 370px; width: 130px; display: none;">
+            <div class="faceplate-header">TRAFO_T1_132/11kV</div>
+            <div class="faceplate-row">
+                <span class="faceplate-label">HV Voltage:</span>
+                <span class="faceplate-value">132.0 kV</span>
+            </div>
+            <div class="faceplate-row">
+                <span class="faceplate-label">LV Voltage:</span>
+                <span class="faceplate-value">11.0 kV</span>
+            </div>
+            <div class="faceplate-row">
+                <span class="faceplate-label">Load:</span>
+                <span class="faceplate-value">45.2 MVA</span>
+            </div>
+            <div class="faceplate-row">
+                <span class="faceplate-label">Oil Temp:</span>
+                <span class="faceplate-value">65°C</span>
+            </div>
+            <div class="faceplate-row">
+                <span class="faceplate-label">Tap Pos:</span>
+                <span class="faceplate-value">+2</span>
+            </div>
+            <button class="button">TAP +</button>
+            <button class="button">TAP -</button>
+        </div>
+    </div>
+    
+    <div class="status-bar">
+        <span>MMS: CONNECTED | GOOSE: ACTIVE | ALARMS: <span id="alarm-count">0</span></span>
+        <span id="connection-status">STATION BUS: 192.168.20.0/24 | PROCESS BUS: 192.168.10.0/24</span>
+    </div>
+    
+    <script>
+        const ws = new WebSocket(`ws://${window.location.host}`);
+        let activeFaceplate = null;
+        
+        function updateSystemTime() {
+            document.getElementById('system-time').textContent = new Date().toLocaleString();
+        }
+        setInterval(updateSystemTime, 1000);
+        updateSystemTime();
+        
+        ws.onmessage = (event) => {
+            const message = JSON.parse(event.data);
+            if (message.type === 'iedUpdate') {
+                updateScadaDisplay(message.data);
+            }
+        };
+        
+        function updateScadaDisplay(data) {
+            // Update relay faceplate
+            document.getElementById('relay-voltage').textContent = `${data.protectionRelay.voltage.toFixed(1)} kV`;
+            document.getElementById('relay-current').textContent = `${data.protectionRelay.current.toFixed(0)} A`;
+            document.getElementById('relay-frequency').textContent = `${data.protectionRelay.frequency.toFixed(2)} Hz`;
+            document.getElementById('relay-fault-current').textContent = `${data.protectionRelay.faultCurrent.toFixed(0)} A`;
+            
+            // Update trip command
+            const tripElement = document.getElementById('relay-trip');
+            tripElement.textContent = data.protectionRelay.tripCommand ? 'TRUE' : 'FALSE';
+            tripElement.className = `faceplate-value ${data.protectionRelay.tripCommand ? 'alarm-value' : ''}`;
+            
+            // Update fault detection
+            const faultElement = document.getElementById('relay-fault');
+            faultElement.textContent = data.protectionRelay.faultDetected ? 'TRUE' : 'FALSE';
+            faultElement.className = `faceplate-value ${data.protectionRelay.faultDetected ? 'alarm-value' : ''}`;
+            
+            // Update circuit breaker
+            const cbElement = document.getElementById('cb-01');
+            const cbPosition = document.getElementById('cb-position');
+            const cbStatus = document.getElementById('cb-status');
+            const cbTrip = document.getElementById('cb-trip');
+            
+            if (data.protectionRelay.breakerStatus) {
+                cbElement.className = 'breaker-symbol open';
+                cbPosition.textContent = 'OPEN';
+                cbPosition.className = 'faceplate-value warning-value';
+            } else {
+                cbElement.className = 'breaker-symbol closed';
+                cbPosition.textContent = 'CLOSED';
+                cbPosition.className = 'faceplate-value';
+            }
+            
+            if (data.circuitBreaker.tripReceived) {
+                cbTrip.innerHTML = '<span class="status-indicator status-alarm"></span>OPERATED';
+                cbTrip.className = 'faceplate-value alarm-value';
+            } else {
+                cbTrip.innerHTML = '<span class="status-indicator status-ok"></span>HEALTHY';
+                cbTrip.className = 'faceplate-value';
+            }
+            
+            // Show/hide alarm bar
+            const alarmBar = document.getElementById('alarm-bar');
+            if (data.protectionRelay.faultDetected || data.protectionRelay.tripCommand) {
+                alarmBar.style.display = 'block';
+                document.getElementById('alarm-count').textContent = '1';
+            } else {
+                alarmBar.style.display = 'none';
+                document.getElementById('alarm-count').textContent = '0';
+            }
+        }
+        
+        function showFaceplate(faceplateId) {
+            // Hide all faceplates
+            document.querySelectorAll('.faceplate').forEach(fp => fp.style.display = 'none');
+            
+            // Show selected faceplate
+            const faceplate = document.getElementById(faceplateId);
+            if (activeFaceplate === faceplateId) {
+                activeFaceplate = null;
+            } else {
+                faceplate.style.display = 'block';
+                activeFaceplate = faceplateId;
+            }
+        }
+        
+        function sendCommand(command) {
+            console.log(`Sending command: ${command}`);
+            if (command === 'TRIP') {
+                // Send trip command via WebSocket
+                ws.send(JSON.stringify({ type: 'command', command: 'sendTrip', data: {} }));
+            }
+        }
+        
+        function resetRelay() {
+            console.log('Resetting relay');
+        }
+        
+        function testRelay() {
+            console.log('Testing relay');
+        }
+        
+        // Hide faceplate when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.faceplate') && !e.target.closest('.breaker-symbol') && !e.target.closest('.relay-symbol') && !e.target.closest('.transformer-symbol')) {
+                document.querySelectorAll('.faceplate').forEach(fp => fp.style.display = 'none');
+                activeFaceplate = null;
+            }
+        });
+    </script>
+</body>
+</html>
