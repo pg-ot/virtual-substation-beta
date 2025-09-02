@@ -85,6 +85,21 @@ ip addr show
 ./build.sh
 ```
 
+### Optional: Generate static model from SCL (advanced)
+This repo includes a compact teaching ICD at `config/models/compact_ied.icd` defining MMXU/PTOC/PTRC/XCBR/CSWI, DataSets, Reports, and GOOSE. If you want the C static model to be generated from the ICD:
+
+1) Build the libiec61850 model generator (requires Java):
+```bash
+cd libiec61850/tools/model_generator
+./gradlew build    # or: ./gradlew jar
+cd -
+```
+2) Re-run build, which will auto-generate `src/static_model.c/.h` from the ICD:
+```bash
+./build.sh
+```
+If the generator isn’t available, the build uses the existing static model.
+
 ## Step 11: Start System
 ```bash
 ./start_all.sh

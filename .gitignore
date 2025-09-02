@@ -1,47 +1,34 @@
 # Build artifacts
-build/
+*.tar
 *.o
-*.a
 *.so
+*.a
 *.exe
 
-# Docker
-.docker/
-docker-compose.override.yml
+# Docker volumes
+docker-volumes/
 
 # Logs
-logs/
 *.log
+logs/
 
-# Node.js
-node_modules/
-npm-debug.log*
-package-lock.json
-
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.egg-info/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
+# Temporary files
+*.tmp
+*.temp
 *~
 
-# OS
+# IDE files
+.vscode/
+.idea/
+
+# OS files
 .DS_Store
 Thumbs.db
 
-# Temporary files
-tmp/
-temp/
-*.tmp
+# Network captures
+*.pcap
+*.pcapng
 
-# Environment
-.env
-.env.local
+# Node modules
+node_modules/
+npm-debug.log*

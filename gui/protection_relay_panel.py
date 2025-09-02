@@ -30,10 +30,30 @@ class ProtectionRelayPanel:
         status_frame = tk.LabelFrame(self.root, text="System Status", 
                                    fg='#00ff00', bg='#2c2c2c', font=('Courier', 10))
         status_frame.pack(fill='x', padx=10, pady=5)
-        
+
         self.status_label = tk.Label(status_frame, text="● ONLINE", 
                                    fg='#00ff00', bg='#2c2c2c', font=('Courier', 10))
         self.status_label.pack(pady=5)
+
+        # Comms LEDs and controls
+        comms_frame = tk.Frame(status_frame, bg='#2c2c2c')
+        comms_frame.pack(fill='x', padx=5, pady=5)
+
+        tk.Label(comms_frame, text="GOOSE TX:", fg='#ccc', bg='#2c2c2c',
+                 font=('Courier', 9)).grid(row=0, column=0, sticky='w')
+        self.goose_tx_led = tk.Label(comms_frame, text="--", fg='#ff0000', bg='#2c2c2c',
+                                     font=('Courier', 10, 'bold'))
+        self.goose_tx_led.grid(row=0, column=1, sticky='w', padx=6)
+
+        tk.Label(comms_frame, text="RX:", fg='#ccc', bg='#2c2c2c',
+                 font=('Courier', 9)).grid(row=0, column=2, sticky='w')
+        self.goose_rx_led = tk.Label(comms_frame, text="--", fg='#ff0000', bg='#2c2c2c',
+                                     font=('Courier', 10, 'bold'))
+        self.goose_rx_led.grid(row=0, column=3, sticky='w', padx=6)
+
+        self.reset_btn = tk.Button(comms_frame, text="RESET LATCH", bg='#444', fg='white',
+                                   font=('Courier', 9, 'bold'), command=self.reset_latch)
+        self.reset_btn.grid(row=0, column=4, padx=10)
         
         # Measurements Frame
         meas_frame = tk.LabelFrame(self.root, text="Sampled Values (SV)", 
@@ -179,6 +199,22 @@ class ProtectionRelayPanel:
                         self.status_label.config(text="● RELAY ONLINE", fg='#00ff00')
                 except:
                     self.status_label.config(text="● OFFLINE", fg='#ff0000')
+                # Update TX (breaker sees relay GOOSE) from HMI diagnostics
+                try:
+                    s = requests.get('http://localhost:8082', timeout=2)
+                    if s.status_code == 200:
+                        st = s.json()
+                        # TX/RX purely from local relay endpoint (front-panel behavior)
+                        tx_ok = bool(st.get('txOk', False))
+                        rx_ok = bool(st.get('rxOk', False))
+                        self.goose_tx_led.config(text=("OK" if tx_ok else "TIMEOUT"),
+                                                 fg=('#00ff00' if tx_ok else '#ff0000'))
+                        self.goose_rx_led.config(text=("OK" if rx_ok else "TIMEOUT"),
+                                                 fg=('#00ff00' if rx_ok else '#ff0000'))
+                except:
+                    self.goose_tx_led.config(text="TIMEOUT", fg='#ff0000')
+                    self.goose_rx_led.config(text="TIMEOUT", fg='#ff0000')
+
                 time.sleep(1)
                 
         thread = threading.Thread(target=monitor, daemon=True)
@@ -288,6 +324,17 @@ Dataset: Events (8 values)
 """
         self.data_text.delete(1.0, tk.END)
         self.data_text.insert(1.0, display_text)
+
+    def reset_latch(self):
+        # Hit HMI reset to clear latches and demonstrate reset path
+        try:
+            r = requests.post('http://localhost:8080/reset', timeout=2)
+            if r.status_code == 200:
+                self.status_label.config(text="● RESET SENT", fg='#00ff00')
+            else:
+                self.status_label.config(text="● RESET FAILED", fg='#ff0000')
+        except Exception:
+            self.status_label.config(text="● RESET ERROR", fg='#ff0000')
         
     def run(self):
         self.root.mainloop()

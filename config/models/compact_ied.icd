@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<SCL xmlns="http://www.iec.ch/61850/2003/SCL" version="2007" revision="B">
+  <Header id="PROT_REL_001-ICD" version="1.0" revision="1"/>
+
+  <IED name="PROT_REL_001">
+    <AccessPoint name="AP1">
+      <Server>
+        <LDevice inst="LD0">
+          <LN0 lnClass="LLN0" inst="">
+            <DataSet name="Events">
+              <FCDA ldInst="LD0" lnClass="PTRC" lnInst="1" doName="Tr" daName="stVal" fc="ST"/>
+              <FCDA ldInst="LD0" lnClass="XCBR" lnInst="1" doName="Pos" daName="stVal" fc="ST"/>
+              <FCDA ldInst="LD0" lnClass="PTOC" lnInst="1" doName="Op" daName="stVal" fc="ST"/>
+              <FCDA ldInst="LD0" lnClass="PTOC" lnInst="1" doName="Str" daName="stVal" fc="ST"/>
+            </DataSet>
+
+            <DataSet name="Analogs">
+              <FCDA ldInst="LD0" lnClass="MMXU" lnInst="1" doName="PhV" daName="mag.f" fc="MX"/>
+              <FCDA ldInst="LD0" lnClass="MMXU" lnInst="1" doName="Amp" daName="mag.f" fc="MX"/>
+              <FCDA ldInst="LD0" lnClass="MMXU" lnInst="1" doName="Hz"  daName="mag.f" fc="MX"/>
+            </DataSet>
+
+            <ReportControl name="EventsRCB01" rptID="EVT" datSet="Events" confRev="1" buffered="false">
+              <TrgOps dchg="true" qchg="true" gi="true"/>
+              <OptFields seqNum="true" timeStamp="true" reasonCode="true" dataSet="true"/>
+              <RptEnabled max="1"/>
+            </ReportControl>
+
+            <GSEControl name="gcbEvents" datSet="Events" appID="4096" confRev="1" type="GOOSE"/>
+            <Address>
+              <P type="MAC-Address">01-0C-CD-01-00-01</P>
+              <P type="VLAN-ID">0</P>
+              <P type="VLAN-PRIORITY">4</P>
+              <P type="APPID">1000</P>
+            </Address>
+          </LN0>
+
+          <LN lnClass="MMXU" inst="1" lnType="MMXU1"/>
+          <LN lnClass="PTOC" inst="1" lnType="PTOC1"/>
+          <LN lnClass="PTRC" inst="1" lnType="PTRC1"/>
+          <LN lnClass="XCBR" inst="1" lnType="XCBR1"/>
+          <LN lnClass="CSWI" inst="1" lnType="CSWI1"/>
+        </LDevice>
+      </Server>
+    </AccessPoint>
+  </IED>
+
+  <Communication>
+    <SubNetwork name="stationbus" type="8-MMS">
+      <ConnectedAP iedName="PROT_REL_001" apName="AP1">
+        <Address>
+          <P type="IP">192.168.20.10</P>
+          <P type="IP-SUBNET">255.255.255.0</P>
+          <P type="IP-GATEWAY">192.168.20.1</P>
+        </Address>
+      </ConnectedAP>
+    </SubNetwork>
+    <SubNetwork name="processbus" type="8-1">
+      <ConnectedAP iedName="PROT_REL_001" apName="AP1">
+        <GSE ldInst="LD0" cbName="gcbEvents">
+          <Address>
+            <P type="MAC-Address">01-0C-CD-01-00-01</P>
+            <P type="APPID">1000</P>
+            <P type="VLAN-ID">0</P>
+            <P type="VLAN-PRIORITY">4</P>
+            <P type="MinTime">4</P>
+            <P type="MaxTime">3000</P>
+          </Address>
+        </GSE>
+      </ConnectedAP>
+    </SubNetwork>
+  </Communication>
+
+  <DataTypeTemplates>
+    <LNodeType id="MMXU1" lnClass="MMXU">
+      <DO name="PhV" type="MV1"/>
+      <DO name="Amp" type="MV1"/>
+      <DO name="Hz"  type="MV1"/>
+    </LNodeType>
+    <LNodeType id="PTOC1" lnClass="PTOC">
+      <DO name="Str" type="SPS1"/>
+      <DO name="Op"  type="SPS1"/>
+    </LNodeType>
+    <LNodeType id="PTRC1" lnClass="PTRC">
+      <DO name="Tr" type="SPS1"/>
+    </LNodeType>
+    <LNodeType id="XCBR1" lnClass="XCBR">
+      <DO name="Pos" type="DPC1"/>
+    </LNodeType>
+    <LNodeType id="CSWI1" lnClass="CSWI">
+      <DO name="Op" type="SPC1"/>
+    </LNodeType>
+
+    <DOType id="MV1" cdc="MV">
+      <DA name="mag" bType="Struct" type="AnalogueValue" fc="MX"/>
+      <DA name="q"   bType="Quality" fc="MX"/>
+      <DA name="t"   bType="Timestamp" fc="MX"/>
+    </DOType>
+    <DOType id="SPS1" cdc="SPS">
+      <DA name="stVal" bType="BOOLEAN" fc="ST"/>
+      <DA name="q"     bType="Quality" fc="ST"/>
+      <DA name="t"     bType="Timestamp" fc="ST"/>
+    </DOType>
+    <DOType id="DPC1" cdc="DPC">
+      <DA name="stVal" bType="Dbpos" fc="ST"/>
+      <DA name="q"     bType="Quality" fc="ST"/>
+      <DA name="t"     bType="Timestamp" fc="ST"/>
+    </DOType>
+    <DOType id="SPC1" cdc="SPC">
+      <DA name="stVal" bType="BOOLEAN" fc="ST"/>
+      <DA name="q"     bType="Quality" fc="ST"/>
+      <DA name="t"     bType="Timestamp" fc="ST"/>
+    </DOType>
+    <DAType id="AnalogueValue">
+      <BDA name="f" bType="FLOAT32"/>
+    </DAType>
+  </DataTypeTemplates>
+</SCL>
+

@@ -14,6 +14,7 @@ COPY libiec61850 ./libiec61850
 COPY src/protection-relay.c ./
 COPY src/static_model.c ./
 COPY src/static_model.h ./
+COPY src/model_alias.h ./
 
 RUN cd libiec61850 && \
     mkdir build && cd build && \

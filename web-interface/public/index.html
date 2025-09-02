@@ -218,14 +218,65 @@
     </div>
 
     <script>
-        const ws = new WebSocket(`ws://${window.location.host}`);
+        let ws;
+        let wsConnected = false;
         
-        ws.onmessage = (event) => {
-            const message = JSON.parse(event.data);
-            if (message.type === 'iedUpdate') {
-                updateDisplay(message.data);
+        // Try WebSocket connection
+        function connectWebSocket() {
+            try {
+                ws = new WebSocket(`ws://${window.location.host}`);
+                
+                ws.onopen = () => {
+                    console.log('WebSocket connected');
+                    wsConnected = true;
+                };
+                
+                ws.onmessage = (event) => {
+                    const message = JSON.parse(event.data);
+                    if (message.type === 'iedUpdate') {
+                        updateDisplay(message.data);
+                    }
+                };
+                
+                ws.onclose = () => {
+                    console.log('WebSocket disconnected');
+                    wsConnected = false;
+                };
+                
+                ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    wsConnected = false;
+                };
+            } catch (error) {
+                console.error('WebSocket connection failed:', error);
+                wsConnected = false;
             }
-        };
+        }
+        
+        // Fallback polling mechanism
+        function pollIEDStatus() {
+            fetch('/api/ied-status')
+                .then(response => response.json())
+                .then(data => {
+                    updateDisplay(data);
+                })
+                .catch(error => {
+                    console.error('Failed to fetch IED status:', error);
+                });
+        }
+        
+        // Start WebSocket connection
+        connectWebSocket();
+        
+        // Start polling as fallback (every 3 seconds)
+        setInterval(() => {
+            if (!wsConnected) {
+                pollIEDStatus();
+            }
+        }, 3000);
+        
+        // Initial status fetch
+        setTimeout(pollIEDStatus, 1000);
 
         function updateDisplay(data) {
             // Protection Relay Status
@@ -292,13 +343,7 @@
             document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
         }
 
-        ws.onopen = () => {
-            console.log('Connected to substation monitor');
-        };
 
-        ws.onclose = () => {
-            console.log('Disconnected from substation monitor');
-        };
 
         // Simulation control functions
         function updateVoltage() {
@@ -348,8 +393,15 @@
         }
 
         function sendCommand(command, data) {
-            if (ws.readyState === WebSocket.OPEN) {
+            if (wsConnected && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'command', command, data }));
+            } else {
+                // Fallback to HTTP API
+                fetch('/api/command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command, data })
+                }).catch(error => console.error('Command failed:', error));
             }
         }
     </script>

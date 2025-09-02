@@ -17,6 +17,9 @@
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 void publishBreakerStatus(bool is_state_change);
 
@@ -33,6 +36,7 @@ static uint32_t last_stnum = 0;
 static uint32_t last_sqnum = 0;
 static uint32_t goose_msg_count = 0;
 static char last_goose_time[32] = "--:--:--";
+static uint64_t last_goose_ms = 0;
 
 // GOOSE sequence management for publisher
 static struct {
@@ -41,17 +45,104 @@ static struct {
     uint32_t sqNum;     // Sequence number - increments on retransmission
 } breaker_goose_state = {false, 1, 0};
 
-// Simple control handler for MMS close command
+// Lightweight HTTP status server (port 8081)
+static void* http_status_thread(void* arg) {
+    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) return NULL;
+
+    int opt = 1;
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    struct sockaddr_in address;
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(8081);
+
+    if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
+        close(server_fd);
+        return NULL;
+    }
+    listen(server_fd, 5);
+
+    while (running) {
+        struct sockaddr_in client;
+        socklen_t clen = sizeof(client);
+        int sock = accept(server_fd, (struct sockaddr*)&client, &clen);
+        if (sock < 0) continue;
+
+        char buffer[512] = {0};
+        recv(sock, buffer, sizeof(buffer) - 1, 0);
+
+        char response[1024];
+        // Basic route handling
+        if (strstr(buffer, "POST /trip")) {
+            pthread_mutex_lock(&breaker_mutex);
+            breaker_open = true; trip_received = true;
+            pthread_mutex_unlock(&breaker_mutex);
+            publishBreakerStatus(true);
+            snprintf(response, sizeof(response),
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\n\r\n{\"status\":\"trip\"}");
+            send(sock, response, strlen(response), 0);
+        } else if (strstr(buffer, "POST /close")) {
+            pthread_mutex_lock(&breaker_mutex);
+            breaker_open = false; trip_received = false;
+            pthread_mutex_unlock(&breaker_mutex);
+            publishBreakerStatus(true);
+            snprintf(response, sizeof(response),
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\n\r\n{\"status\":\"close\"}");
+            send(sock, response, strlen(response), 0);
+        } else {
+            // Status JSON
+            pthread_mutex_lock(&breaker_mutex);
+            uint64_t now = Hal_getTimeInMs();
+            bool rx_ok = (last_goose_ms != 0) && ((now - last_goose_ms) < 3000);
+            static uint32_t br_tx_count = 0; // total publishes
+            static uint64_t br_last_tx_ms = 0;
+            // Note: updated in publishBreakerStatus via externs below
+            const char* json_fmt =
+                "{\"stNum\":%u,\"sqNum\":%u,\"messageCount\":%u,\"lastTime\":\"%s\",\"breakerOpen\":%s,\"tripReceived\":%s,\"rxOk\":%s,\"lastRxMs\":%llu,\"txCount\":%u,\"lastTxMs\":%llu,\"txOk\":%s}";
+            char body[512];
+            snprintf(body, sizeof(body), json_fmt,
+                     last_stnum, last_sqnum, goose_msg_count, last_goose_time,
+                     breaker_open ? "true" : "false",
+                     trip_received ? "true" : "false",
+                     rx_ok ? "true" : "false",
+                     (unsigned long long) last_goose_ms,
+                     br_tx_count,
+                     (unsigned long long) br_last_tx_ms,
+                     ((br_last_tx_ms != 0) && ((now - br_last_tx_ms) < 3000)) ? "true" : "false");
+            pthread_mutex_unlock(&breaker_mutex);
+            snprintf(response, sizeof(response),
+                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\n\r\n%s",
+                     body);
+            send(sock, response, strlen(response), 0);
+        }
+        close(sock);
+    }
+
+    close(server_fd);
+    return NULL;
+}
+
+// MMS control handler for breaker open/close commands
 ControlHandlerResult controlHandler(ControlAction action, void* parameter, MmsValue* ctlVal, bool test) {
     if (ControlAction_isSelect(action)) {
-        bool closeCmd = MmsValue_getBoolean(ctlVal);
+        bool openCmd = MmsValue_getBoolean(ctlVal);
         pthread_mutex_lock(&breaker_mutex);
-        if (!closeCmd && breaker_open) {  // Close command (false = close)
+        
+        if (openCmd && !breaker_open) {  // Open command (true = open)
+            printf("\n>>> MMS OPEN COMMAND RECEIVED <<<\n");
+            breaker_open = true;
+            trip_received = false;
+            pthread_mutex_unlock(&breaker_mutex);
+            publishBreakerStatus(true);
+            return CONTROL_RESULT_OK;
+        } else if (!openCmd && breaker_open) {  // Close command (false = close)
             printf("\n>>> MMS CLOSE COMMAND RECEIVED <<<\n");
             breaker_open = false;
             trip_received = false;
             pthread_mutex_unlock(&breaker_mutex);
-            publishBreakerStatus(true);  // State change
+            publishBreakerStatus(true);
             return CONTROL_RESULT_OK;
         }
         pthread_mutex_unlock(&breaker_mutex);
@@ -101,91 +192,22 @@ void publishBreakerStatus(bool is_state_change) {
     }
     
     LinkedList_destroyDeep(dataSetValues, (LinkedListValueDeleteFunction) MmsValue_delete);
+    // Update local TX supervision counters
+    static uint32_t* p_tx_count = NULL;
+    static uint64_t* p_last_tx_ms = NULL;
+    // initialize static pointers to ensure single storage
+    if (p_tx_count == NULL) {
+        static uint32_t tx_count_storage = 0; p_tx_count = &tx_count_storage;
+    }
+    if (p_last_tx_ms == NULL) {
+        static uint64_t last_tx_ms_storage = 0; p_last_tx_ms = &last_tx_ms_storage;
+    }
+    (*p_tx_count)++;
+    (*p_last_tx_ms) = Hal_getTimeInMs();
     pthread_mutex_unlock(&breaker_mutex);
 }
 
-void* tcp_server_thread(void* arg) {
-    struct sockaddr_in address;
-    int opt = 1;
-    
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(8081);
-    
-    bind(server_fd, (struct sockaddr*)&address, sizeof(address));
-    listen(server_fd, 3);
-    
-    printf("✅ HTTP Server listening on port 8081\n");
-    
-    while (running) {
-        int client_fd = accept(server_fd, NULL, NULL);
-        if (client_fd >= 0) {
-            char buffer[1024] = {0};
-            int bytes_read = recv(client_fd, buffer, 1023, 0);
-            
-            char response[512];
-            
-            if (bytes_read <= 0) {
-                close(client_fd);
-                continue;
-            }
-            
-            if (strstr(buffer, "POST /trip")) {
-                pthread_mutex_lock(&breaker_mutex);
-                breaker_open = true;
-                pthread_mutex_unlock(&breaker_mutex);
-                printf(">>> MANUAL TRIP via HTTP\n");
-                publishBreakerStatus(true);  // State change
-                snprintf(response, sizeof(response),
-                    "HTTP/1.1 200 OK\r\n"
-                    "Content-Type: application/json\r\n"
-                    "\r\n"
-                    "{\"status\":\"tripped\"}");
-            } else if (strstr(buffer, "POST /close")) {
-                pthread_mutex_lock(&breaker_mutex);
-                if (breaker_open) {
-                    breaker_open = false;
-                    trip_received = false;
-                    pthread_mutex_unlock(&breaker_mutex);
-                    printf(">>> MANUAL CLOSE via HTTP\n");
-                    publishBreakerStatus(true);  // State change
-                } else {
-                    pthread_mutex_unlock(&breaker_mutex);
-                }
-                snprintf(response, sizeof(response),
-                    "HTTP/1.1 200 OK\r\n"
-                    "Content-Type: application/json\r\n"
-                    "\r\n"
-                    "{\"status\":\"closed\"}");
-            } else {
-                // Handle GET requests for status
-                pthread_mutex_lock(&breaker_mutex);
-                snprintf(response, sizeof(response),
-                    "HTTP/1.1 200 OK\r\n"
-                    "Content-Type: application/json\r\n"
-                    "Access-Control-Allow-Origin: *\r\n"
-                    "\r\n"
-                    "{\"position\":\"%s\",\"tripReceived\":%s,\"status\":\"normal\",\"gooseStNum\":%u,\"gooseSqNum\":%u,\"gooseMsgCount\":%u,\"lastGooseTime\":\"%s\"}",
-                    breaker_open ? "OPEN" : "CLOSED",
-                    trip_received ? "true" : "false",
-                    last_stnum, last_sqnum, goose_msg_count, last_goose_time);
-                pthread_mutex_unlock(&breaker_mutex);
-            }
-            
-            int sent = send(client_fd, response, strlen(response), 0);
-            shutdown(client_fd, SHUT_WR);
-            close(client_fd);
-            
-            if (sent > 0) {
-                printf("HTTP response sent: %d bytes\n", sent);
-            }
-        }
-    }
-    return NULL;
-}
+
 
 static void gooseListener(GooseSubscriber subscriber, void* parameter) {
     static uint32_t lastStNum = 0;
@@ -259,7 +281,10 @@ static void gooseListener(GooseSubscriber subscriber, void* parameter) {
             breaker_open = true;
             trip_received = true;
             printf(">>> Circuit Breaker OPENED automatically\n");
-            pthread_mutex_unlock(&breaker_mutex);
+    pthread_mutex_unlock(&breaker_mutex);
+    
+    // Track last receive time (ms)
+    last_goose_ms = Hal_getTimeInMs();
             publishBreakerStatus(true);  // State change
         } else if (!trip && trip_received) {
             // Reset trip flag when trip command goes away
@@ -370,17 +395,20 @@ int main(int argc, char** argv) {
     }
     
     printf("✅ Circuit breaker ready\n");
-    
+    // Start HTTP status server thread
+    pthread_t http_thread;
+    pthread_create(&http_thread, NULL, http_status_thread, NULL);
+
     printf("Breaker Status: %s\n\n", breaker_open ? "OPEN" : "CLOSED");
     
-    // Start TCP server for panel communication
-    pthread_t tcp_thread;
-    pthread_create(&tcp_thread, NULL, tcp_server_thread, NULL);
+
     
     signal(SIGINT, sigint_handler);
     
     // Add heartbeat timer
     static int heartbeat_counter = 0;
+    // Supervision publish timer
+    static int supervision_counter = 0;
     
     while (running) {
         // Heartbeat every 3 seconds
@@ -388,6 +416,21 @@ int main(int argc, char** argv) {
         if (heartbeat_counter >= 30) {
             publishBreakerStatus(false); // Heartbeat
             heartbeat_counter = 0;
+        }
+        
+        // Update simple GOOSE supervision (GGIO1.Ind1) every ~500ms
+        supervision_counter++;
+        if (supervision_counter >= 5) {
+            supervision_counter = 0;
+            bool rx_ok = false;
+            uint64_t now = Hal_getTimeInMs();
+            if (last_goose_ms != 0 && (now - last_goose_ms) < 3000) rx_ok = true; // within 3s
+
+            IedServer_lockDataModel(iedServer);
+            IedServer_updateBooleanAttributeValue(iedServer, IEDMODEL_GenericIO_GGIO1_Ind1_stVal, rx_ok);
+            Quality q = 0; Quality_setValidity(&q, QUALITY_VALIDITY_GOOD);
+            IedServer_updateQuality(iedServer, IEDMODEL_GenericIO_GGIO1_Ind1_q, q);
+            IedServer_unlockDataModel(iedServer);
         }
         
         Thread_sleep(100); // 100ms sleep

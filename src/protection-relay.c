@@ -16,6 +16,7 @@
 #include <pthread.h>
 #include <netdb.h>
 #include "static_model.h"
+#include "model_alias.h"
 
 static int running = 0;
 static IedServer iedServer = NULL;
@@ -30,6 +31,45 @@ void publishGooseMessage(bool is_state_change);
 
 void sigint_handler(int signalId) {
     running = 0;
+}
+
+// Prototypes for helper/server
+static void* http_status_thread(void* arg);
+static void build_status_json(char* body, size_t len);
+
+// Lightweight HTTP status server (port 8082) for GUI
+static void* http_status_thread(void* arg) {
+    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) return NULL;
+    int opt = 1;
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    struct sockaddr_in address;
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(8082);
+    if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
+        close(server_fd);
+        return NULL;
+    }
+    listen(server_fd, 5);
+    printf("✅ Relay HTTP status server listening on port 8082\n");
+    while (running) {
+        struct sockaddr_in client; socklen_t clen = sizeof(client);
+        int sock = accept(server_fd, (struct sockaddr*)&client, &clen);
+        if (sock < 0) continue;
+        char buffer[512] = {0};
+        recv(sock, buffer, sizeof(buffer)-1, 0);
+        // Respond with JSON of current measured and status values
+        char body[512];
+        build_status_json(body, sizeof(body));
+        char response[1024];
+        snprintf(response, sizeof(response),
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\n\r\n%s", body);
+        send(sock, response, strlen(response), 0);
+        close(sock);
+    }
+    close(server_fd);
+    return NULL;
 }
 
 // MMS Report Event Handler (simplified)
@@ -59,6 +99,31 @@ typedef struct {
 static ProtectionState prot_state = {0, 0, 0, "Normal", 0};
 static SimulationData simData = {132.0, 450.0, 50.0, 0.0};
 static volatile bool g_breaker_status_from_goose = false;
+// RX supervision for breaker status GOOSE (received by relay)
+static uint32_t br_rx_count = 0;
+static uint64_t br_last_rx_ms = 0;
+// TX supervision for relay GOOSE publish
+static uint32_t rl_tx_count = 0;
+static uint64_t rl_last_tx_ms = 0;
+
+// Build JSON body for HTTP status
+static void build_status_json(char* body, size_t len) {
+    uint64_t now = Hal_getTimeInMs();
+    bool rx_ok = (br_last_rx_ms != 0) && ((now - br_last_rx_ms) < 3000);
+    bool tx_ok = (rl_last_tx_ms != 0) && ((now - rl_last_tx_ms) < 3000);
+    snprintf(body, len,
+        "{\"voltage\":%.1f,\"current\":%.0f,\"frequency\":%.3f,\"faultCurrent\":%.0f,\"faultDetected\":%s,\"tripCommand\":%s,\"breakerStatus\":%s,\"rxCount\":%u,\"lastRxMs\":%llu,\"rxOk\":%s,\"txCount\":%u,\"lastTxMs\":%llu,\"txOk\":%s}",
+        simData.voltage, simData.current, simData.frequency, simData.faultCurrent,
+        (prot_state.overcurrent_pickup || prot_state.ground_fault_pickup) ? "true" : "false",
+        prot_state.trip_active ? "true" : "false",
+        g_breaker_status_from_goose ? "true" : "false",
+        br_rx_count,
+        (unsigned long long) br_last_rx_ms,
+        rx_ok ? "true" : "false",
+        rl_tx_count,
+        (unsigned long long) rl_last_tx_ms,
+        tx_ok ? "true" : "false");
+}
 
 // GOOSE state tracking for proper stNum/sqNum management
 static struct {
@@ -79,6 +144,8 @@ static void breakerStatusListener(GooseSubscriber subscriber, void* parameter) {
             g_breaker_status_from_goose = MmsValue_getBoolean(breakerPos);
             printf(">>> GOOSE Breaker Status Received: %s\n", 
                    g_breaker_status_from_goose ? "OPEN" : "CLOSED");
+            br_rx_count++;
+            br_last_rx_ms = Hal_getTimeInMs();
         }
     }
 }
@@ -128,62 +195,7 @@ int fetchSimulationData(SimulationData* data) {
     return -1;
 }
 
-void* http_server_thread(void* arg) {
-    struct sockaddr_in address;
-    int opt = 1;
-    
-    http_server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    setsockopt(http_server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(8082);
-    
-    bind(http_server_fd, (struct sockaddr*)&address, sizeof(address));
-    listen(http_server_fd, 3);
-    
-    printf("✅ HTTP Server listening on port 8082\n");
-    
-    while (running) {
-        int client_fd = accept(http_server_fd, NULL, NULL);
-        if (client_fd >= 0) {
-            char buffer[1024] = {0};
-            recv(client_fd, buffer, 1023, 0);
 
-            if (strstr(buffer, "POST /trip")) {
-                printf("\n>>> MANUAL TRIP via HTTP <<<\n");
-                prot_state.trip_active = 1;
-                strcpy(prot_state.trip_reason, "Manual Trip (GUI)");
-                
-                // Immediately publish GOOSE message
-                publishGooseMessage(true);  // State change
-                printf(">>> GOOSE TRIP PUBLISHED: %s\n", prot_state.trip_reason);
-
-                char response[] = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"trip_sent\"}";
-                send(client_fd, response, strlen(response), 0);
-            } 
-            else {
-                char response[1024];
-                snprintf(response, sizeof(response),
-                    "HTTP/1.1 200 OK\r\n"
-                    "Content-Type: application/json\r\n"
-                    "Access-Control-Allow-Origin: *\r\n"
-                    "\r\n"
-                    "{\"voltage\":%.1f,\"current\":%.0f,\"frequency\":%.3f,\"faultCurrent\":%.0f,\"tripCommand\":%s,\"breakerStatus\":%s,\"faultDetected\":%s,\"overcurrentPickup\":%s,\"tripReason\":\"%s\"}",
-                    simData.voltage, simData.current, simData.frequency, simData.faultCurrent,
-                    prot_state.trip_active ? "true" : "false",
-                    g_breaker_status_from_goose ? "true" : "false",
-                    (prot_state.overcurrent_pickup || prot_state.ground_fault_pickup) ? "true" : "false",
-                    prot_state.overcurrent_pickup ? "true" : "false",
-                    prot_state.trip_reason);
-                
-                send(client_fd, response, strlen(response), 0);
-            }
-            close(client_fd);
-        }
-    }
-    return NULL;
-}
 
 void publishGooseMessage(bool is_state_change) {
     if (!goosePublisher) return;
@@ -201,38 +213,63 @@ void publishGooseMessage(bool is_state_change) {
     }
     
     LinkedList dataSetValues = LinkedList_create();
-    
+
+    // Determine if test mode is active for Quality.test flag
+    bool test_mode = false;
+    const char* testEnv = getenv("TEST_MODE");
+    if (testEnv && (strcmp(testEnv, "1") == 0 || strcmp(testEnv, "true") == 0 || strcmp(testEnv, "TRUE") == 0)) {
+        test_mode = true;
+    }
+
+    // Helper to create a Quality MMS value (C-style)
+    Quality q_template = 0;
+    Quality_setValidity(&q_template, QUALITY_VALIDITY_GOOD);
+    if (test_mode) Quality_setFlag(&q_template, QUALITY_TEST);
+
+    // SPCSO1 - Trip Command (stVal + q)
     LinkedList_add(dataSetValues, MmsValue_newBoolean(prot_state.trip_active));
-    LinkedList_add(dataSetValues, MmsValue_newUtcTimeByMsTime(Hal_getTimeInMs()));
-    
+    LinkedList_add(dataSetValues, Quality_toMmsValue(&q_template, NULL));
+
+    // SPCSO2 - Breaker Position (stVal + q)
     LinkedList_add(dataSetValues, MmsValue_newBoolean(g_breaker_status_from_goose));
-    LinkedList_add(dataSetValues, MmsValue_newUtcTimeByMsTime(Hal_getTimeInMs()));
-    
+    LinkedList_add(dataSetValues, Quality_toMmsValue(&q_template, NULL));
+
+    // SPCSO3 - Fault Detected (stVal + q)
     LinkedList_add(dataSetValues, MmsValue_newBoolean(prot_state.overcurrent_pickup || prot_state.ground_fault_pickup));
-    LinkedList_add(dataSetValues, MmsValue_newUtcTimeByMsTime(Hal_getTimeInMs()));
-    
+    LinkedList_add(dataSetValues, Quality_toMmsValue(&q_template, NULL));
+
+    // SPCSO4 - Overcurrent Pickup (stVal + q)
     LinkedList_add(dataSetValues, MmsValue_newBoolean(prot_state.overcurrent_pickup));
-    LinkedList_add(dataSetValues, MmsValue_newUtcTimeByMsTime(Hal_getTimeInMs()));
-    
+    LinkedList_add(dataSetValues, Quality_toMmsValue(&q_template, NULL));
+
     GoosePublisher_publish(goosePublisher, dataSetValues);
-    
+    // Update TX supervision
+    rl_last_tx_ms = Hal_getTimeInMs();
+    rl_tx_count++;
+
     LinkedList_destroyDeep(dataSetValues, (LinkedListValueDeleteFunction) MmsValue_delete);
 }
 
 ControlHandlerResult
 controlHandler(ControlAction action, void* parameter, MmsValue* ctlVal, bool test) {
-    if (ControlAction_isSelect(action) || !ControlAction_isSelect(action)) {
-        if (MmsValue_getBoolean(ctlVal)) {
+    if (ControlAction_isSelect(action)) {
+        bool tripCmd = MmsValue_getBoolean(ctlVal);
+        if (tripCmd) {
             printf("\n>>> MMS CONTROL: Manual Trip Received <<<\n");
             prot_state.trip_active = 1;
             strcpy(prot_state.trip_reason, "Manual Trip (MMS)");
-            
-            // Immediately publish GOOSE message
-            publishGooseMessage(true);  // State change
+            publishGooseMessage(true);
             printf(">>> GOOSE TRIP PUBLISHED: %s\n", prot_state.trip_reason);
-            
-            return CONTROL_RESULT_OK;
+        } else {
+            printf("\n>>> MMS CONTROL: Trip Reset Received <<<\n");
+            prot_state.trip_active = 0;
+            prot_state.overcurrent_pickup = 0;
+            prot_state.ground_fault_pickup = 0;
+            strcpy(prot_state.trip_reason, "Normal");
+            publishGooseMessage(true);
+            printf(">>> PROTECTION RESET via MMS\n");
         }
+        return CONTROL_RESULT_OK;
     }
     return CONTROL_RESULT_FAILED;
 }
@@ -249,6 +286,8 @@ int main(int argc, char** argv) {
 
     IedServer_setControlHandler(iedServer, IEDMODEL_GenericIO_GGIO1_SPCSO1, 
                                (ControlHandler) controlHandler, NULL);
+    // Install RCB event handler for reporting supervision/logging
+    IedServer_setRCBEventHandler(iedServer, (IedServer_RCBEventHandler) rcbEventHandler, NULL);
     printf("✅ MMS Control Handler for Manual Trip installed\n");
     
     IedServer_start(iedServer, 102);
@@ -277,10 +316,11 @@ int main(int argc, char** argv) {
     }
     if (goosePublisher) {
         GoosePublisher_setGoCbRef(goosePublisher, "simpleIOGenericIO/LLN0$GO$gcbEvents");
-        GoosePublisher_setDataSetRef(goosePublisher, "simpleIOGenericIO/LLN0$dataset");
+        // Align with static model: DataSetRef must be LLN0$Events3
+        GoosePublisher_setDataSetRef(goosePublisher, "simpleIOGenericIO/LLN0$Events3");
         GoosePublisher_setConfRev(goosePublisher, 1);
         GoosePublisher_setTimeAllowedToLive(goosePublisher, 3000);
-        printf("✅ GOOSE Publisher initialized on eth0\n");
+        printf("✅ GOOSE Publisher initialized on eth0 (DataSet=LLN0$Events3)\n");
     } else {
         printf("❌ GOOSE Publisher failed to initialize\n");
     }
@@ -304,9 +344,12 @@ int main(int argc, char** argv) {
     
     running = 1;
     signal(SIGINT, sigint_handler);
-    
+
+    // Start HTTP status server for GUI
     pthread_t http_thread;
-    pthread_create(&http_thread, NULL, http_server_thread, NULL);
+    pthread_create(&http_thread, NULL, http_status_thread, NULL);
+    
+
     
     int cycle = 0;
     
@@ -389,15 +432,27 @@ int main(int argc, char** argv) {
         
         IedServer_lockDataModel(iedServer);
         
-        IedServer_updateBooleanAttributeValue(iedServer, IEDMODEL_GenericIO_GGIO1_SPCSO1_stVal, prot_state.trip_active);
-        IedServer_updateBooleanAttributeValue(iedServer, IEDMODEL_GenericIO_GGIO1_SPCSO2_stVal, g_breaker_status_from_goose);
-        IedServer_updateBooleanAttributeValue(iedServer, IEDMODEL_GenericIO_GGIO1_SPCSO3_stVal, (prot_state.overcurrent_pickup || prot_state.ground_fault_pickup));
-        IedServer_updateBooleanAttributeValue(iedServer, IEDMODEL_GenericIO_GGIO1_SPCSO4_stVal, prot_state.overcurrent_pickup);
+        IedServer_updateBooleanAttributeValue(iedServer, IEDMODEL_LD0_PTRC1_Tr_stVal, prot_state.trip_active);
+        IedServer_updateBooleanAttributeValue(iedServer, IEDMODEL_LD0_XCBR1_Pos_stVal, g_breaker_status_from_goose);
+        IedServer_updateBooleanAttributeValue(iedServer, IEDMODEL_LD0_PTOC1_Op_stVal, (prot_state.overcurrent_pickup || prot_state.ground_fault_pickup));
+        IedServer_updateBooleanAttributeValue(iedServer, IEDMODEL_LD0_PTOC1_Str_stVal, prot_state.overcurrent_pickup);
+
+        // Update Quality attributes to GOOD (and TEST if requested)
+        Quality q = 0;
+        Quality_setValidity(&q, QUALITY_VALIDITY_GOOD);
+        const char* testEnv = getenv("TEST_MODE");
+        if (testEnv && (strcmp(testEnv, "1") == 0 || strcmp(testEnv, "true") == 0 || strcmp(testEnv, "TRUE") == 0)) {
+            Quality_setFlag(&q, QUALITY_TEST);
+        }
+        IedServer_updateQuality(iedServer, IEDMODEL_GenericIO_GGIO1_SPCSO1_q, q);
+        IedServer_updateQuality(iedServer, IEDMODEL_GenericIO_GGIO1_SPCSO2_q, q);
+        IedServer_updateQuality(iedServer, IEDMODEL_GenericIO_GGIO1_SPCSO3_q, q);
+        IedServer_updateQuality(iedServer, IEDMODEL_GenericIO_GGIO1_SPCSO4_q, q);
         
-        IedServer_updateFloatAttributeValue(iedServer, IEDMODEL_GenericIO_GGIO1_AnIn1_mag_f, simData.voltage);
-        IedServer_updateFloatAttributeValue(iedServer, IEDMODEL_GenericIO_GGIO1_AnIn2_mag_f, simData.current);
-        IedServer_updateFloatAttributeValue(iedServer, IEDMODEL_GenericIO_GGIO1_AnIn3_mag_f, simData.frequency);
-        IedServer_updateFloatAttributeValue(iedServer, IEDMODEL_GenericIO_GGIO1_AnIn4_mag_f, simData.faultCurrent);
+        IedServer_updateFloatAttributeValue(iedServer, IEDMODEL_LD0_MMXU1_PhV_mag_f, simData.voltage);
+        IedServer_updateFloatAttributeValue(iedServer, IEDMODEL_LD0_MMXU1_Amp_mag_f, simData.current);
+        IedServer_updateFloatAttributeValue(iedServer, IEDMODEL_LD0_MMXU1_Hz_mag_f, simData.frequency);
+        // Fault current remains mapped to extra GGIO analog (AnIn4) for now
         
         IedServer_updateUTCTimeAttributeValue(iedServer, IEDMODEL_GenericIO_GGIO1_SPCSO1_t, timestamp);
         IedServer_updateUTCTimeAttributeValue(iedServer, IEDMODEL_GenericIO_GGIO1_SPCSO2_t, timestamp);

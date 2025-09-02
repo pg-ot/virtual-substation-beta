@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<SCL xmlns="http://www.iec.ch/61850/2003/SCL" version="2007" revision="B">
+  <Header id="CB_LINE_01_001-ICD" version="1.0" revision="1"/>
+
+  <IED name="CB_LINE_01_001">
+    <AccessPoint name="AP1">
+      <Server>
+        <LDevice inst="LD0">
+          <LN0 lnClass="LLN0" inst="">
+            <!-- DataSets -->
+            <DataSet name="BrkStatus">
+              <FCDA ldInst="LD0" lnClass="XCBR" lnInst="1" doName="Pos" daName="stVal" fc="ST"/>
+            </DataSet>
+
+            <!-- Unbuffered report for breaker status (optional) -->
+            <ReportControl name="BrkStatusRCB01" rptID="BSTAT" datSet="BrkStatus" confRev="1" buffered="false">
+              <TrgOps dchg="true" qchg="true" gi="true"/>
+              <OptFields seqNum="true" timeStamp="true" reasonCode="true" dataSet="true"/>
+              <RptEnabled max="1"/>
+            </ReportControl>
+
+            <!-- GOOSE publisher for breaker status -->
+            <GSEControl name="gcbStatus" datSet="BrkStatus" appID="4097" confRev="1" type="GOOSE"/>
+            <Address>
+              <P type="MAC-Address">01-0C-CD-01-00-02</P>
+              <P type="VLAN-ID">0</P>
+              <P type="VLAN-PRIORITY">4</P>
+              <P type="APPID">1001</P> <!-- hex APPID 0x1001 -->
+            </Address>
+
+            <!-- (Optional) GOOSE subscription to relay Events via ExtRef (illustrative) -->
+            <Inputs>
+              <ExtRef iedName="PROT_REL_001" ldInst="LD0" lnClass="PTRC" lnInst="1" doName="Tr" daName="stVal"
+                      serviceType="GOOSE" srcLDInst="LD0" srcLNClass="LLN0" srcCBName="gcbEvents"/>
+            </Inputs>
+          </LN0>
+
+          <!-- Breaker position LN -->
+          <LN lnClass="XCBR" inst="1" lnType="XCBR1"/>
+
+          <!-- Switch control LN (close/open commands) -->
+          <LN lnClass="CSWI" inst="1" lnType="CSWI1"/>
+        </LDevice>
+      </Server>
+    </AccessPoint>
+  </IED>
+
+  <Communication>
+    <SubNetwork name="stationbus" type="8-MMS">
+      <ConnectedAP iedName="CB_LINE_01_001" apName="AP1">
+        <Address>
+          <P type="IP">192.168.20.11</P>
+          <P type="IP-SUBNET">255.255.255.0</P>
+          <P type="IP-GATEWAY">192.168.20.1</P>
+        </Address>
+      </ConnectedAP>
+    </SubNetwork>
+    <SubNetwork name="processbus" type="8-1">
+      <ConnectedAP iedName="CB_LINE_01_001" apName="AP1">
+        <GSE ldInst="LD0" cbName="gcbStatus">
+          <Address>
+            <P type="MAC-Address">01-0C-CD-01-00-02</P>
+            <P type="APPID">1001</P>
+            <P type="VLAN-ID">0</P>
+            <P type="VLAN-PRIORITY">4</P>
+            <P type="MinTime">4</P>
+            <P type="MaxTime">3000</P>
+          </Address>
+        </GSE>
+      </ConnectedAP>
+    </SubNetwork>
+  </Communication>
+
+  <DataTypeTemplates>
+    <!-- XCBR and CSWI types (compact) -->
+    <LNodeType id="XCBR1" lnClass="XCBR">
+      <DO name="Pos" type="DPC1"/>
+    </LNodeType>
+    <LNodeType id="CSWI1" lnClass="CSWI">
+      <DO name="Op" type="SPC1"/>
+    </LNodeType>
+
+    <DOType id="DPC1" cdc="DPC">
+      <DA name="stVal" bType="Dbpos" fc="ST"/>
+      <DA name="q"     bType="Quality" fc="ST"/>
+      <DA name="t"     bType="Timestamp" fc="ST"/>
+    </DOType>
+    <DOType id="SPC1" cdc="SPC">
+      <DA name="stVal" bType="BOOLEAN" fc="ST"/>
+      <DA name="q"     bType="Quality" fc="ST"/>
+      <DA name="t"     bType="Timestamp" fc="ST"/>
+    </DOType>
+  </DataTypeTemplates>
+</SCL>
+

@@ -46,7 +46,11 @@ class CircuitBreakerPanel:
         self.trip_received_label = tk.Label(goose_frame, text="TRIP RECEIVED: NO", 
                                           fg='#ccc', bg='#2c2c2c', font=('Courier', 10))
         self.trip_received_label.pack(pady=2)
-        
+
+        self.goose_ok_label = tk.Label(goose_frame, text="GOOSE RX: TIMEOUT",
+                                      fg='#ff0000', bg='#2c2c2c', font=('Courier', 10, 'bold'))
+        self.goose_ok_label.pack(pady=2)
+
         self.stnum_label = tk.Label(goose_frame, text="State Number: 0", 
                                   fg='#ccc', bg='#2c2c2c', font=('Courier', 9))
         self.stnum_label.pack(pady=1)
@@ -107,6 +111,10 @@ class CircuitBreakerPanel:
         scrollbar = tk.Scrollbar(log_frame, command=self.log_text.yview)
         scrollbar.pack(side='right', fill='y')
         self.log_text.config(yscrollcommand=scrollbar.set)
+
+        # Supervision tracking
+        self._last_counter = None
+        self._last_change_ts = 0.0
         
     def manual_trip(self):
         # Send direct command to breaker container
@@ -224,11 +232,11 @@ class CircuitBreakerPanel:
             self.trip_received_label.config(text="TRIP RECEIVED: NO", fg='#ccc')
             
         # Update GOOSE message details
-        stnum = data.get('gooseStNum', 0)
-        sqnum = data.get('gooseSqNum', 0)
-        msg_count = data.get('gooseMsgCount', 0)
-        last_time = data.get('lastGooseTime', '--:--:--')
-        
+        stnum = data.get('gooseStNum', data.get('stNum', 0))
+        sqnum = data.get('gooseSqNum', data.get('sqNum', 0))
+        msg_count = data.get('gooseMsgCount', data.get('messageCount', 0))
+        last_time = data.get('lastGooseTime', data.get('lastTime', '--:--:--'))
+
         self.stnum_label.config(text=f"State Number: {stnum}")
         self.sqnum_label.config(text=f"Sequence Number: {sqnum}")
         
@@ -236,6 +244,14 @@ class CircuitBreakerPanel:
         if hasattr(self, 'last_msg_count') and msg_count > self.last_msg_count:
             self.log_message(f"GOOSE MSG: StNum={stnum} SqNum={sqnum} Time={last_time}")
         
+        # Update RX supervision (3s window)
+        if self._last_counter is None or msg_count != self._last_counter:
+            self._last_counter = msg_count
+            self._last_change_ts = time.time()
+        goose_ok = (time.time() - self._last_change_ts) < 3.0
+        self.goose_ok_label.config(text=("GOOSE RX: OK" if goose_ok else "GOOSE RX: TIMEOUT"),
+                                   fg=('#00ff00' if goose_ok else '#ff0000'))
+
         self.last_msg_count = msg_count
         self.last_trip_state_direct = trip_received
         

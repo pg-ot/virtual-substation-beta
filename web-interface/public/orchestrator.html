@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Substation Orchestrator</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; background: #0f1216; color: #e8eaed; margin: 0; }
+    header { background: #1f2937; padding: 16px 24px; display: flex; align-items: baseline; gap: 16px; }
+    header h1 { margin: 0; color: #60a5fa; font-size: 20px; }
+    header a { color: #93c5fd; text-decoration: none; margin-right: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; padding: 16px; }
+    .card { background: #111827; border: 1px solid #374151; border-radius: 10px; padding: 16px; }
+    .title { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .ok { background: #10b981; box-shadow: 0 0 8px #10b981; }
+    .bad { background: #ef4444; box-shadow: 0 0 8px #ef4444; }
+    .warn{ background: #f59e0b; box-shadow: 0 0 8px #f59e0b; }
+    .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 13px; }
+    .kv div { background: #0b1017; border: 1px solid #253042; border-radius: 6px; padding: 6px 8px; }
+    .section { margin-top: 10px; font-weight: 600; color: #93c5fd; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid #374151; margin-right: 6px; }
+    .pill.ok { border-color: #10b981; color: #10b981; }
+    .pill.bad { border-color: #ef4444; color: #ef4444; }
+    .pill.warn { border-color: #f59e0b; color: #f59e0b; }
+    footer { padding: 12px 16px; color: #9ca3af; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Substation Orchestrator</h1>
+    <nav>
+      <a href="/">Single Line</a>
+      <a href="/scada">SCADA View</a>
+      <a href="/orchestrator.html">Orchestrator</a>
+    </nav>
+  </header>
+
+  <div class="grid">
+    <div class="card" id="relay-card">
+      <div class="title"><span id="relay-dot" class="dot bad"></span><strong>Protection Relay (PROT_REL_001)</strong></div>
+      <div class="kv">
+        <div>Voltage: <span id="relay-v">--</span></div>
+        <div>Current: <span id="relay-i">--</span></div>
+        <div>Frequency: <span id="relay-f">--</span></div>
+        <div>Trip Cmd: <span id="relay-trip">--</span></div>
+        <div>Fault: <span id="relay-fault">--</span></div>
+        <div>OC Pickup: <span id="relay-oc">--</span></div>
+      </div>
+      <div class="section">GOOSE</div>
+      <span id="goose-pill" class="pill bad">Relay→Breaker: GOOSE RX</span>
+      <div class="section">Notes</div>
+      <div style="font-size:12px;color:#9ca3af">Relay publishes GOOSE dataset Events3 (stVal+q). Interaction via Tkinter panels.</div>
+    </div>
+
+    <div class="card" id="breaker-card">
+      <div class="title"><span id="breaker-dot" class="dot bad"></span><strong>Circuit Breaker (CB_LINE_01_001)</strong></div>
+      <div class="kv">
+        <div>Position: <span id="breaker-pos">--</span></div>
+        <div>Trip Rx: <span id="breaker-trip">--</span></div>
+        <div>StNum: <span id="br-st">0</span></div>
+        <div>SqNum: <span id="br-sq">0</span></div>
+      </div>
+      <div class="section">GOOSE</div>
+      <span id="goose-pill2" class="pill bad">RX OK</span>
+      <div class="section">Notes</div>
+      <div style="font-size:12px;color:#9ca3af">Breaker subscribes to Protection Relay GOOSE. Feedback via MMS shown in HMI.</div>
+    </div>
+
+    <div class="card" id="hmi-card">
+      <div class="title"><span id="hmi-dot" class="dot bad"></span><strong>HMI / SCADA</strong></div>
+      <div class="kv">
+        <div>MMS: <span id="hmi-mms">--</span></div>
+        <div>Reports: <span id="hmi-reports">--</span></div>
+        <div>Last Alarm: <span id="hmi-alarm">--</span></div>
+        <div>Last Updated: <span id="last-updated">--</span></div>
+      </div>
+      <div class="section">Notes</div>
+      <div style="font-size:12px;color:#9ca3af">MMS client subscribes to URCB (EventsRCB01). GUI panels provide interaction.</div>
+    </div>
+
+  <div class="card" id="network-card">
+      <div class="title"><span class="dot warn"></span><strong>Network Overview</strong></div>
+      <div class="kv">
+        <div>Process Bus: 192.168.10.0/24</div>
+        <div>Station Bus: 192.168.20.0/24</div>
+        <div>Web UI: <a href="/" style="color:#93c5fd">http://localhost:3000</a></div>
+        <div>HMI API: <a href="#" style="color:#93c5fd">http://localhost:8080</a></div>
+      </div>
+      <div class="section">Guidance</div>
+      <div style="font-size:12px;color:#9ca3af">Use Tkinter panels (make gui) for user interactions (trip/close, scenarios). Orchestrator shows health and comms.</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin:16px;">
+    <div class="title"><strong>Sequence of Events (SOE)</strong></div>
+    <pre id="soe" style="background:#0b1017;border:1px solid #253042;border-radius:8px;padding:10px;max-height:220px;overflow:auto;">Loading...</pre>
+  </div>
+
+  <div class="card" style="margin: 16px;">
+    <div class="title"><strong>Automated Test Runner</strong></div>
+    <div style="font-size:13px;color:#9ca3af;margin-bottom:8px;">Runs end-to-end scenarios (51/50/51G/81U) via simulator + HMI and validates outcomes.</div>
+    <button id="run-tests" style="background:#2563eb;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;">Run Tests</button>
+    <button id="refresh-diag" style="background:#374151;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;margin-left:8px;">Refresh Diagnostics</button>
+    <pre id="test-output" style="background:#0b1017;border:1px solid #253042;border-radius:8px;padding:10px;margin-top:10px;max-height:300px;overflow:auto;">No test run yet.</pre>
+  </div>
+
+  <footer>
+    Status auto-refreshes every 2-3s. For interactions, use Tkinter GUIs (make gui).
+  </footer>
+
+  <script>
+    const relayDot = document.getElementById('relay-dot');
+    const breakerDot = document.getElementById('breaker-dot');
+    const hmiDot = document.getElementById('hmi-dot');
+    const goosePill = document.getElementById('goose-pill');
+    const goosePill2 = document.getElementById('goose-pill2');
+
+    function setDot(el, ok) {
+      el.classList.remove('ok','bad');
+      el.classList.add(ok ? 'ok' : 'bad');
+    }
+    function setPill(el, ok, label) {
+      el.classList.remove('ok','bad','warn');
+      el.classList.add(ok ? 'ok' : 'bad');
+      el.textContent = label;
+    }
+
+    function updateFromStatus(status) {
+      try {
+        // Protection relay
+        const pr = status.protectionRelay || {};
+        setDot(relayDot, pr.status === 'online');
+        document.getElementById('relay-v').textContent = (pr.voltage ?? '--') + ' kV';
+        document.getElementById('relay-i').textContent = (pr.current ?? '--') + ' A';
+        document.getElementById('relay-f').textContent = (pr.frequency ?? '--') + ' Hz';
+        document.getElementById('relay-trip').textContent = pr.tripCommand ? 'ACTIVE' : 'Normal';
+        document.getElementById('relay-fault').textContent = pr.faultDetected ? 'FAULT' : 'Normal';
+        document.getElementById('relay-oc').textContent = pr.overcurrentPickup ? 'PICKUP' : 'Normal';
+
+        // Breaker
+        const br = status.circuitBreaker || {};
+        setDot(breakerDot, br.status === 'online');
+        document.getElementById('breaker-pos').textContent = pr.breakerStatus ? 'OPEN' : 'CLOSED';
+        document.getElementById('breaker-trip').textContent = pr.tripCommand ? 'YES' : 'NO';
+        document.getElementById('br-st').textContent = br.stateNumber ?? 0;
+        document.getElementById('br-sq').textContent = br.sequenceNumber ?? 0;
+
+        // GOOSE supervision (from diagnostics)
+        const gooseOk = !!status.gooseRxOk;
+        setPill(goosePill, gooseOk, `Relay→Breaker: GOOSE ${gooseOk ? 'OK' : 'TIMEOUT'}`);
+        setPill(goosePill2, gooseOk, gooseOk ? 'RX OK' : 'RX TIMEOUT');
+
+        // HMI
+        const connected = !!status.reportsEnabled || pr.status === 'online';
+        setDot(hmiDot, connected);
+        document.getElementById('hmi-mms').textContent = connected ? 'Connected' : 'Offline';
+        document.getElementById('hmi-reports').textContent = status.reportsEnabled ? 'Enabled' : 'Disabled';
+        document.getElementById('hmi-alarm').textContent = (pr.tripCommand ? 'Trip Active' : (pr.faultDetected ? 'Fault Detected' : 'None'));
+        const ts = status.lastUpdated ? new Date(status.lastUpdated) : null;
+        document.getElementById('last-updated').textContent = ts ? ts.toLocaleTimeString() : '--';
+      } catch (e) { console.error(e); }
+    }
+
+    // Use WebSocket for live updates, fallback to polling
+    let lastStatus = null;
+    function applyWS(data) {
+      if (data && data.type === 'iedUpdate') {
+        // Merge diagnostics fields if present
+        const merged = Object.assign({}, data.data || {}, lastStatus || {});
+        lastStatus = merged;
+        updateFromStatus(merged);
+      }
+    }
+    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
+    ws.onmessage = (ev) => { try { applyWS(JSON.parse(ev.data)); } catch(e){} };
+    ws.onerror = () => {};
+
+    async function poll() {
+      try {
+        const r = await fetch('/api/ied-status');
+        const base = await r.json();
+        const d = await fetch('/api/diagnostics').then(res => res.json()).catch(()=>({}));
+        const merged = Object.assign({}, base, d);
+        lastStatus = merged;
+        updateFromStatus(merged);
+        // SOE
+        const s = await fetch('/api/soe').then(x=>x.json()).catch(()=>[]);
+        document.getElementById('soe').textContent = (s||[]).filter(Boolean).join('\n') || 'No events yet';
+      } catch (e) {}
+      setTimeout(poll, 3000);
+    }
+    poll();
+
+    // Test runner
+    const btn = document.getElementById('run-tests');
+    const out = document.getElementById('test-output');
+    const refreshBtn = document.getElementById('refresh-diag');
+    btn.onclick = async () => {
+      btn.disabled = true; btn.textContent = 'Running...'; out.textContent = 'Running tests...';
+      try {
+        const r = await fetch('/api/run-tests', { method: 'POST' });
+        const data = await r.json();
+        const lines = [];
+        lines.push(`OK: ${data.ok}  Duration: ${data.durationMs}ms`);
+        (data.results||[]).forEach(item => {
+          lines.push(`${item.ok ? '✓' : '✗'} ${item.name} (${item.elapsed||0}ms)`);
+        });
+        out.textContent = lines.join('\n');
+      } catch (e) {
+        out.textContent = 'Error running tests';
+      } finally {
+        btn.disabled = false; btn.textContent = 'Run Tests';
+      }
+    };
+
+    // Manual refresh button
+    refreshBtn.onclick = async () => {
+      refreshBtn.disabled = true; const t = refreshBtn.textContent; refreshBtn.textContent = 'Refreshing...';
+      try {
+        const r = await fetch('/api/refresh-status', { method: 'POST' });
+        const json = await r.json();
+        if (json && json.data) updateFromStatus(json.data);
+      } catch (e) {}
+      refreshBtn.disabled = false; refreshBtn.textContent = 'Refresh Diagnostics';
+    };
+  </script>
+</body>
+</html>

@@ -26,12 +26,27 @@ typedef struct {
     bool faultDetected;
     bool overcurrentPickup;
     char lastAlarm[128];
+    bool gooseRxOk; // from breaker supervision
 } HMIData;
 
 static HMIData hmiData = {0};
 
 // Global connection for HTTP commands
 static IedConnection global_con = NULL;
+static bool reportingEnabled = false; // URCB state
+
+// Simple SOE ring buffer
+#define SOE_MAX 64
+static char soe[SOE_MAX][160];
+static int soe_head = 0;
+static void soe_add(const char* msg) {
+    time_t now = time(NULL);
+    struct tm* tm_info = localtime(&now);
+    char ts[16];
+    strftime(ts, sizeof(ts), "%H:%M:%S", tm_info);
+    snprintf(soe[soe_head], sizeof(soe[soe_head]), "%s %s", ts, msg);
+    soe_head = (soe_head + 1) % SOE_MAX;
+}
 
 void* http_server_thread(void* arg) {
     int server_fd, new_socket;
@@ -64,17 +79,36 @@ void* http_server_thread(void* arg) {
         
         char response[1024];
         
-        if (strstr(buffer, "POST /trip")) {
-            printf("\n>>> HMI HTTP: Manual Trip Command <<<\n");
+        if (strstr(buffer, "GET /soe")) {
+            // Return SOE as JSON array
+            char body[4096];
+            int pos = 0;
+            pos += snprintf(body + pos, sizeof(body) - pos, "[");
+            for (int i = 0; i < SOE_MAX; i++) {
+                int idx = (soe_head + i) % SOE_MAX;
+                if (soe[idx][0] == '\0') continue;
+                if (pos < (int)sizeof(body) - 1 && body[0] != '[') {}
+                if (pos > 1) pos += snprintf(body + pos, sizeof(body) - pos, ",");
+                pos += snprintf(body + pos, sizeof(body) - pos, "\"%s\"", soe[idx]);
+            }
+            pos += snprintf(body + pos, sizeof(body) - pos, "]");
+            snprintf(response, sizeof(response),
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: application/json\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "\r\n"
+                "%s", body);
+        } else if (strstr(buffer, "POST /trip")) {
+            printf("\n>>> MMS CONTROL: Manual Trip Command <<<\n");
             if (global_con) {
                 IedClientError error;
-                ControlObjectClient control = ControlObjectClient_create("simpleIOGenericIO/GGIO1.SPCSO1", global_con);
+                ControlObjectClient control = ControlObjectClient_create("simpleIOGenericIO/GGIO1.SPCSO1", global_con); // TODO: switch to LD0/CSWI1.Op
                 if (control) {
                     MmsValue* ctlVal = MmsValue_newBoolean(true);
                     ControlObjectClient_operate(control, ctlVal, 0);
                     MmsValue_delete(ctlVal);
                     ControlObjectClient_destroy(control);
-                    strcpy(hmiData.lastAlarm, "Manual Trip Issued via HMI");
+                    strcpy(hmiData.lastAlarm, "Manual Trip Issued via MMS");
                 }
             }
             snprintf(response, sizeof(response),
@@ -83,6 +117,120 @@ void* http_server_thread(void* arg) {
                 "Access-Control-Allow-Origin: *\r\n"
                 "\r\n"
                 "{\"status\":\"trip_sent\"}");
+        } else if (strstr(buffer, "POST /close")) {
+            printf("\n>>> MMS CONTROL: Breaker Close Command <<<\n");
+            IedConnection breakerCon = IedConnection_create();
+            IedClientError breakerError;
+            IedConnection_connect(breakerCon, &breakerError, "circuit_breaker_ied", 103);
+            
+            if (breakerError == IED_ERROR_OK) {
+                ControlObjectClient control = ControlObjectClient_create("simpleIOGenericIO/GGIO1.SPCSO2", breakerCon); // TODO: switch to LD0/CSWI1.Op
+                if (control) {
+                    MmsValue* ctlVal = MmsValue_newBoolean(false);
+                    ControlObjectClient_operate(control, ctlVal, 0);
+                    MmsValue_delete(ctlVal);
+                    ControlObjectClient_destroy(control);
+                    strcpy(hmiData.lastAlarm, "Breaker Close via MMS");
+                }
+                IedConnection_close(breakerCon);
+            }
+            IedConnection_destroy(breakerCon);
+            snprintf(response, sizeof(response),
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: application/json\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "\r\n"
+                "{\"status\":\"close_sent\"}");
+        } else if (strstr(buffer, "POST /open")) {
+            printf("\n>>> MMS CONTROL: Breaker Open Command <<<\n");
+            IedConnection breakerCon = IedConnection_create();
+            IedClientError breakerError;
+            IedConnection_connect(breakerCon, &breakerError, "circuit_breaker_ied", 103);
+            
+            if (breakerError == IED_ERROR_OK) {
+                ControlObjectClient control = ControlObjectClient_create("simpleIOGenericIO/GGIO1.SPCSO2", breakerCon); // TODO: switch to LD0/CSWI1.Op
+                if (control) {
+                    MmsValue* ctlVal = MmsValue_newBoolean(true);
+                    ControlObjectClient_operate(control, ctlVal, 0);
+                    MmsValue_delete(ctlVal);
+                    ControlObjectClient_destroy(control);
+                    strcpy(hmiData.lastAlarm, "Breaker Open via MMS");
+                }
+                IedConnection_close(breakerCon);
+            }
+            IedConnection_destroy(breakerCon);
+            snprintf(response, sizeof(response),
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: application/json\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "\r\n"
+                "{\"status\":\"open_sent\"}");
+        } else if (strstr(buffer, "POST /reset")) {
+            printf("\n>>> MMS CONTROL: Protection Reset Command <<<\n");
+            if (global_con) {
+                // Reset trip command
+                ControlObjectClient control = ControlObjectClient_create("simpleIOGenericIO/GGIO1.SPCSO1", global_con);
+                if (control) {
+                    MmsValue* ctlVal = MmsValue_newBoolean(false);
+                    ControlObjectClient_operate(control, ctlVal, 0);
+                    MmsValue_delete(ctlVal);
+                    ControlObjectClient_destroy(control);
+                }
+                strcpy(hmiData.lastAlarm, "Protection Reset via MMS");
+            }
+            snprintf(response, sizeof(response),
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: application/json\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "\r\n"
+                "{\"status\":\"reset_sent\"}");
+        } else if (strstr(buffer, "GET /diagnostics")) {
+            printf("\n>>> MMS DIAGNOSTICS: System Status Check <<<\n");
+            
+            // Test protection relay connection
+            char protectionStatus[32] = "OFFLINE";
+            if (global_con) {
+                IedClientError testError;
+                MmsValue* testRead = IedConnection_readObject(global_con, &testError, REF_MMXU_VOLT, IEC61850_FC_MX);
+                if (testRead && testError == IED_ERROR_OK) {
+                    strcpy(protectionStatus, "ONLINE");
+                    MmsValue_delete(testRead);
+                }
+            }
+            
+            // Test circuit breaker connection
+            char breakerStatus[32] = "OFFLINE";
+            int gooseCount = 0;
+            IedConnection testBreaker = IedConnection_create();
+            IedClientError breakerError;
+            IedConnection_connect(testBreaker, &breakerError, "circuit_breaker_ied", 103);
+            if (breakerError == IED_ERROR_OK) {
+                strcpy(breakerStatus, "ONLINE");
+                // Read breaker position via MMS
+                MmsValue* breakerPos = IedConnection_readObject(testBreaker, &breakerError, REF_XCBR_POS, IEC61850_FC_ST);
+                if (breakerPos) {
+                    hmiData.breakerStatus = MmsValue_getBoolean(breakerPos);
+                    MmsValue_delete(breakerPos);
+                }
+                // Read GOOSE supervision (Ind1.stVal)
+                MmsValue* gooseRx = IedConnection_readObject(testBreaker, &breakerError, "simpleIOGenericIO/GGIO1.Ind1.stVal", IEC61850_FC_ST);
+                if (gooseRx) {
+                    hmiData.gooseRxOk = MmsValue_getBoolean(gooseRx);
+                    MmsValue_delete(gooseRx);
+                }
+                IedConnection_close(testBreaker);
+            }
+            IedConnection_destroy(testBreaker);
+            
+            snprintf(response, sizeof(response),
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: application/json\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "\r\n"
+                "{\"protectionRelay\":\"%s\",\"circuitBreaker\":\"%s\",\"gooseCount\":%d,\"gooseRxOk\":%s,\"reportsEnabled\":%s}",
+                protectionStatus, breakerStatus, gooseCount,
+                hmiData.gooseRxOk ? "true" : "false",
+                reportingEnabled ? "true" : "false");
         } else {
             // GET request - return status data
             snprintf(response, sizeof(response),
@@ -92,7 +240,7 @@ void* http_server_thread(void* arg) {
                 "\r\n"
                 "{\"voltage\":%.1f,\"current\":%.0f,\"frequency\":%.3f,\"faultCurrent\":%.0f,"
                 "\"tripCommand\":%s,\"breakerStatus\":%s,\"faultDetected\":%s,\"overcurrentPickup\":%s,"
-                "\"lastAlarm\":\"%s\"}",
+                "\"lastAlarm\":\"%s\",\"gooseData\":{\"messageCount\":0}}",
                 hmiData.voltage, hmiData.current, hmiData.frequency, hmiData.faultCurrent,
                 hmiData.tripCommand ? "true" : "false",
                 hmiData.breakerStatus ? "true" : "false",
@@ -115,7 +263,25 @@ void reportCallbackFunction(void* parameter, ClientReport report) {
     
     MmsValue* dataSetValues = ClientReport_getDataSetValues(report);
     if (dataSetValues) {
-        printf("Real-time data updated via MMS reporting\n");
+        int count = MmsValue_getArraySize(dataSetValues);
+        printf("Real-time data updated via MMS reporting (items=%d)\n", count);
+        // Expect DataSet LLN0$Events (4 booleans: SPCSO1..4 stVal)
+        if (count >= 1) {
+            MmsValue* v0 = MmsValue_getElement(dataSetValues, 0);
+            if (v0 && MmsValue_getType(v0) == MMS_BOOLEAN) hmiData.tripCommand = MmsValue_getBoolean(v0);
+        }
+        if (count >= 2) {
+            MmsValue* v1 = MmsValue_getElement(dataSetValues, 1);
+            if (v1 && MmsValue_getType(v1) == MMS_BOOLEAN) hmiData.breakerStatus = MmsValue_getBoolean(v1);
+        }
+        if (count >= 3) {
+            MmsValue* v2 = MmsValue_getElement(dataSetValues, 2);
+            if (v2 && MmsValue_getType(v2) == MMS_BOOLEAN) hmiData.faultDetected = MmsValue_getBoolean(v2);
+        }
+        if (count >= 4) {
+            MmsValue* v3 = MmsValue_getElement(dataSetValues, 3);
+            if (v3 && MmsValue_getType(v3) == MMS_BOOLEAN) hmiData.overcurrentPickup = MmsValue_getBoolean(v3);
+        }
     }
     printf("==========================\n");
 }
@@ -193,12 +359,30 @@ int main(int argc, char** argv) {
     if (error == IED_ERROR_OK) {
         printf("✅ MMS Connection established to %s:%d\n", hostname, tcpPort);
         
+        // Enable URCB: EventsRCB01 (trgOps=dchg+qchg, IntgPd=2000ms, RptEna=true, GI=true)
+        ClientReportControlBlock rcb = ClientReportControlBlock_create("simpleIOGenericIO/LLN0.RP.EventsRCB01");
+        if (rcb) {
+            IedConnection_getRCBValues(con, &error, ClientReportControlBlock_getObjectReference(rcb), rcb);
+            ClientReportControlBlock_setTrgOps(rcb, TRG_OPT_DATA_CHANGED | TRG_OPT_QUALITY_CHANGED);
+            ClientReportControlBlock_setIntgPd(rcb, 2000);
+            ClientReportControlBlock_setRptEna(rcb, true);
+            ClientReportControlBlock_setGI(rcb, true);
+            uint32_t mask = RCB_ELEMENT_TRG_OPS | RCB_ELEMENT_INTG_PD | RCB_ELEMENT_RPT_ENA | RCB_ELEMENT_GI;
+            IedConnection_setRCBValues(con, &error, rcb, mask, true);
+            if (error == IED_ERROR_OK) {
+                printf("✅ URCB 'EventsRCB01' enabled (IntgPd=2000ms, GI set)\n");
+                reportingEnabled = true;
+            } else {
+                printf("❌ Failed to enable URCB (error=%d)\n", error);
+            }
+            ClientReportControlBlock_destroy(rcb);
+        }
+
         // Install report handler for real-time updates
         IedConnection_installReportHandler(con, "simpleIOGenericIO/LLN0.RP.EventsRCB01", 
                                          NULL, reportCallbackFunction, NULL);
-        
-        // Note: Reporting functionality simplified for compatibility
-        printf("✅ MMS Connection ready for data polling\n");
+
+        printf("✅ MMS Reporting enabled; polling reduced to analogs/diagnostics\n");
         
         signal(SIGINT, sigint_handler);
         
@@ -211,19 +395,19 @@ int main(int argc, char** argv) {
             cycle++;
             
             // Read analog measurements via MMS
-            MmsValue* voltage = IedConnection_readObject(con, &error, "simpleIOGenericIO/GGIO1.AnIn1.mag.f", IEC61850_FC_MX);
+            MmsValue* voltage = IedConnection_readObject(con, &error, REF_MMXU_VOLT, IEC61850_FC_MX);
             if (voltage && error == IED_ERROR_OK) {
                 hmiData.voltage = MmsValue_toFloat(voltage);
                 MmsValue_delete(voltage);
             }
             
-            MmsValue* current = IedConnection_readObject(con, &error, "simpleIOGenericIO/GGIO1.AnIn2.mag.f", IEC61850_FC_MX);
+            MmsValue* current = IedConnection_readObject(con, &error, REF_MMXU_CURR, IEC61850_FC_MX);
             if (current && error == IED_ERROR_OK) {
                 hmiData.current = MmsValue_toFloat(current);
                 MmsValue_delete(current);
             }
             
-            MmsValue* frequency = IedConnection_readObject(con, &error, "simpleIOGenericIO/GGIO1.AnIn3.mag.f", IEC61850_FC_MX);
+            MmsValue* frequency = IedConnection_readObject(con, &error, REF_MMXU_FREQ, IEC61850_FC_MX);
             if (frequency && error == IED_ERROR_OK) {
                 hmiData.frequency = MmsValue_toFloat(frequency);
                 MmsValue_delete(frequency);
@@ -235,41 +419,50 @@ int main(int argc, char** argv) {
                 MmsValue_delete(faultCurrent);
             }
             
-            // Read digital status via MMS
-            MmsValue* tripCmd = IedConnection_readObject(con, &error, "simpleIOGenericIO/GGIO1.SPCSO1.stVal", IEC61850_FC_ST);
-            if (tripCmd && error == IED_ERROR_OK) {
-                hmiData.tripCommand = MmsValue_getBoolean(tripCmd);
-                MmsValue_delete(tripCmd);
-            }
+            // Digital status updated by reports; skip frequent reads for SPCSO1
             
-            MmsValue* breakerSt = IedConnection_readObject(con, &error, "simpleIOGenericIO/GGIO1.SPCSO2.stVal", IEC61850_FC_ST);
-            if (breakerSt && error == IED_ERROR_OK) {
-                hmiData.breakerStatus = MmsValue_getBoolean(breakerSt);
-                MmsValue_delete(breakerSt);
+            // Read breaker status from circuit breaker MMS server
+            IedConnection breakerCon = IedConnection_create();
+            IedClientError breakerError;
+            IedConnection_connect(breakerCon, &breakerError, "circuit_breaker_ied", 103);
+            if (breakerError == IED_ERROR_OK) {
+            MmsValue* breakerSt = IedConnection_readObject(breakerCon, &breakerError, REF_XCBR_POS, IEC61850_FC_ST);
+                if (breakerSt && breakerError == IED_ERROR_OK) {
+                    hmiData.breakerStatus = MmsValue_getBoolean(breakerSt);
+                    MmsValue_delete(breakerSt);
+                }
+                IedConnection_close(breakerCon);
             }
+            IedConnection_destroy(breakerCon);
             
-            MmsValue* faultDet = IedConnection_readObject(con, &error, "simpleIOGenericIO/GGIO1.SPCSO3.stVal", IEC61850_FC_ST);
+            MmsValue* faultDet = IedConnection_readObject(con, &error, REF_PTOC_OP, IEC61850_FC_ST);
             if (faultDet && error == IED_ERROR_OK) {
                 hmiData.faultDetected = MmsValue_getBoolean(faultDet);
                 MmsValue_delete(faultDet);
             }
             
-            MmsValue* ocPickup = IedConnection_readObject(con, &error, "simpleIOGenericIO/GGIO1.SPCSO4.stVal", IEC61850_FC_ST);
+            MmsValue* ocPickup = IedConnection_readObject(con, &error, REF_PTOC_STR, IEC61850_FC_ST);
             if (ocPickup && error == IED_ERROR_OK) {
                 hmiData.overcurrentPickup = MmsValue_getBoolean(ocPickup);
                 MmsValue_delete(ocPickup);
             }
             
-            // Update alarm status
+            // Update alarm status and build SOE on changes
+            static bool lastTrip = false, lastFault = false, lastOc = false, lastBr = false;
             if (hmiData.tripCommand) {
                 strcpy(hmiData.lastAlarm, "Protection Trip Active");
+                if (!lastTrip) soe_add("TRIP COMMAND ACTIVE");
             } else if (hmiData.faultDetected) {
                 strcpy(hmiData.lastAlarm, "System Fault Detected");
+                if (!lastFault) soe_add("FAULT DETECTED");
             } else if (hmiData.overcurrentPickup) {
                 strcpy(hmiData.lastAlarm, "Overcurrent Pickup");
+                if (!lastOc) soe_add("OVERCURRENT PICKUP");
             } else {
                 strcpy(hmiData.lastAlarm, "All Systems Normal");
             }
+            if (hmiData.breakerStatus != lastBr) soe_add(hmiData.breakerStatus ? "BREAKER OPEN" : "BREAKER CLOSED");
+            lastTrip = hmiData.tripCommand; lastFault = hmiData.faultDetected; lastOc = hmiData.overcurrentPickup; lastBr = hmiData.breakerStatus;
             
             // Display HMI screen
             displayHMIScreen();
