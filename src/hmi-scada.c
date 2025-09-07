@@ -1,5 +1,6 @@
 #include "iec61850_client.h"
 #include "hal_thread.h"
+#include "model_alias.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <signal.h>
@@ -102,7 +103,7 @@ void* http_server_thread(void* arg) {
             printf("\n>>> MMS CONTROL: Manual Trip Command <<<\n");
             if (global_con) {
                 IedClientError error;
-                ControlObjectClient control = ControlObjectClient_create("simpleIOGenericIO/GGIO1.SPCSO1", global_con); // TODO: switch to LD0/CSWI1.Op
+                ControlObjectClient control = ControlObjectClient_create("simpleIOGenericIO/CSWI1.Op", global_con);
                 if (control) {
                     MmsValue* ctlVal = MmsValue_newBoolean(true);
                     ControlObjectClient_operate(control, ctlVal, 0);
@@ -121,10 +122,12 @@ void* http_server_thread(void* arg) {
             printf("\n>>> MMS CONTROL: Breaker Close Command <<<\n");
             IedConnection breakerCon = IedConnection_create();
             IedClientError breakerError;
-            IedConnection_connect(breakerCon, &breakerError, "circuit_breaker_ied", 103);
+            const char* brHost = getenv("BREAKER_HOST"); if (!brHost) brHost = "circuit_breaker_ied";
+            int brPort = 103; const char* brPortEnv = getenv("BREAKER_PORT"); if (brPortEnv) brPort = atoi(brPortEnv);
+            IedConnection_connect(breakerCon, &breakerError, brHost, brPort);
             
             if (breakerError == IED_ERROR_OK) {
-                ControlObjectClient control = ControlObjectClient_create("simpleIOGenericIO/GGIO1.SPCSO2", breakerCon); // TODO: switch to LD0/CSWI1.Op
+                ControlObjectClient control = ControlObjectClient_create("simpleIOGenericIO/CSWI1.Op", breakerCon);
                 if (control) {
                     MmsValue* ctlVal = MmsValue_newBoolean(false);
                     ControlObjectClient_operate(control, ctlVal, 0);
@@ -145,10 +148,12 @@ void* http_server_thread(void* arg) {
             printf("\n>>> MMS CONTROL: Breaker Open Command <<<\n");
             IedConnection breakerCon = IedConnection_create();
             IedClientError breakerError;
-            IedConnection_connect(breakerCon, &breakerError, "circuit_breaker_ied", 103);
+            const char* brHost = getenv("BREAKER_HOST"); if (!brHost) brHost = "circuit_breaker_ied";
+            int brPort = 103; const char* brPortEnv = getenv("BREAKER_PORT"); if (brPortEnv) brPort = atoi(brPortEnv);
+            IedConnection_connect(breakerCon, &breakerError, brHost, brPort);
             
             if (breakerError == IED_ERROR_OK) {
-                ControlObjectClient control = ControlObjectClient_create("simpleIOGenericIO/GGIO1.SPCSO2", breakerCon); // TODO: switch to LD0/CSWI1.Op
+                ControlObjectClient control = ControlObjectClient_create("simpleIOGenericIO/CSWI1.Op", breakerCon);
                 if (control) {
                     MmsValue* ctlVal = MmsValue_newBoolean(true);
                     ControlObjectClient_operate(control, ctlVal, 0);
@@ -169,7 +174,7 @@ void* http_server_thread(void* arg) {
             printf("\n>>> MMS CONTROL: Protection Reset Command <<<\n");
             if (global_con) {
                 // Reset trip command
-                ControlObjectClient control = ControlObjectClient_create("simpleIOGenericIO/GGIO1.SPCSO1", global_con);
+                ControlObjectClient control = ControlObjectClient_create("simpleIOGenericIO/CSWI1.Op", global_con);
                 if (control) {
                     MmsValue* ctlVal = MmsValue_newBoolean(false);
                     ControlObjectClient_operate(control, ctlVal, 0);
@@ -203,7 +208,9 @@ void* http_server_thread(void* arg) {
             int gooseCount = 0;
             IedConnection testBreaker = IedConnection_create();
             IedClientError breakerError;
-            IedConnection_connect(testBreaker, &breakerError, "circuit_breaker_ied", 103);
+            const char* brHost = getenv("BREAKER_HOST"); if (!brHost) brHost = "circuit_breaker_ied";
+            int brPort = 103; const char* brPortEnv = getenv("BREAKER_PORT"); if (brPortEnv) brPort = atoi(brPortEnv);
+            IedConnection_connect(testBreaker, &breakerError, brHost, brPort);
             if (breakerError == IED_ERROR_OK) {
                 strcpy(breakerStatus, "ONLINE");
                 // Read breaker position via MMS
@@ -212,12 +219,7 @@ void* http_server_thread(void* arg) {
                     hmiData.breakerStatus = MmsValue_getBoolean(breakerPos);
                     MmsValue_delete(breakerPos);
                 }
-                // Read GOOSE supervision (Ind1.stVal)
-                MmsValue* gooseRx = IedConnection_readObject(testBreaker, &breakerError, "simpleIOGenericIO/GGIO1.Ind1.stVal", IEC61850_FC_ST);
-                if (gooseRx) {
-                    hmiData.gooseRxOk = MmsValue_getBoolean(gooseRx);
-                    MmsValue_delete(gooseRx);
-                }
+                // GOOSE supervision is now tracked internally by breaker and via HTTP; skip MMS read here.
                 IedConnection_close(testBreaker);
             }
             IedConnection_destroy(testBreaker);
@@ -335,8 +337,10 @@ void displayHMIScreen() {
 }
 
 int main(int argc, char** argv) {
-    char* hostname = "protection_relay_ied";
-    int tcpPort = 102;
+    const char* hostEnv = getenv("RELAY_HOST");
+    const char* portEnv = getenv("MMS_PORT");
+    const char* hostname = (hostEnv && strlen(hostEnv) > 0) ? hostEnv : "protection_relay_ied";
+    int tcpPort = (portEnv && strlen(portEnv) > 0) ? atoi(portEnv) : 102;
     
     printf("=== IEC 61850 HMI/SCADA SYSTEM ===\n");
     printf("MMS Client connecting to: %s:%d\n", hostname, tcpPort);
@@ -360,7 +364,7 @@ int main(int argc, char** argv) {
         printf("✅ MMS Connection established to %s:%d\n", hostname, tcpPort);
         
         // Enable URCB: EventsRCB01 (trgOps=dchg+qchg, IntgPd=2000ms, RptEna=true, GI=true)
-        ClientReportControlBlock rcb = ClientReportControlBlock_create("simpleIOGenericIO/LLN0.RP.EventsRCB01");
+        ClientReportControlBlock rcb = ClientReportControlBlock_create("simpleIOGenericIO/LLN0.RP.EventsRCB");
         if (rcb) {
             IedConnection_getRCBValues(con, &error, ClientReportControlBlock_getObjectReference(rcb), rcb);
             ClientReportControlBlock_setTrgOps(rcb, TRG_OPT_DATA_CHANGED | TRG_OPT_QUALITY_CHANGED);
@@ -379,7 +383,7 @@ int main(int argc, char** argv) {
         }
 
         // Install report handler for real-time updates
-        IedConnection_installReportHandler(con, "simpleIOGenericIO/LLN0.RP.EventsRCB01", 
+        IedConnection_installReportHandler(con, "simpleIOGenericIO/LLN0.RP.EventsRCB", 
                                          NULL, reportCallbackFunction, NULL);
 
         printf("✅ MMS Reporting enabled; polling reduced to analogs/diagnostics\n");
@@ -413,7 +417,7 @@ int main(int argc, char** argv) {
                 MmsValue_delete(frequency);
             }
             
-            MmsValue* faultCurrent = IedConnection_readObject(con, &error, "simpleIOGenericIO/GGIO1.AnIn4.mag.f", IEC61850_FC_MX);
+            MmsValue* faultCurrent = IedConnection_readObject(con, &error, REF_MMXU_CURR, IEC61850_FC_MX);
             if (faultCurrent && error == IED_ERROR_OK) {
                 hmiData.faultCurrent = MmsValue_toFloat(faultCurrent);
                 MmsValue_delete(faultCurrent);
@@ -422,13 +426,23 @@ int main(int argc, char** argv) {
             // Digital status updated by reports; skip frequent reads for SPCSO1
             
             // Read breaker status from circuit breaker MMS server
-            IedConnection breakerCon = IedConnection_create();
-            IedClientError breakerError;
-            IedConnection_connect(breakerCon, &breakerError, "circuit_breaker_ied", 103);
+                IedConnection breakerCon = IedConnection_create();
+                IedClientError breakerError;
+                const char* brHost = getenv("BREAKER_HOST"); if (!brHost) brHost = "circuit_breaker_ied";
+                int brPort = 103; const char* brPortEnv = getenv("BREAKER_PORT"); if (brPortEnv) brPort = atoi(brPortEnv);
+                IedConnection_connect(breakerCon, &breakerError, brHost, brPort);
             if (breakerError == IED_ERROR_OK) {
-            MmsValue* breakerSt = IedConnection_readObject(breakerCon, &breakerError, REF_XCBR_POS, IEC61850_FC_ST);
+                MmsValue* breakerSt = IedConnection_readObject(breakerCon, &breakerError, REF_XCBR_POS, IEC61850_FC_ST);
                 if (breakerSt && breakerError == IED_ERROR_OK) {
-                    hmiData.breakerStatus = MmsValue_getBoolean(breakerSt);
+                    bool open = false;
+                    if (MmsValue_getType(breakerSt) == MMS_INTEGER) {
+                        int32_t dp = MmsValue_toInt32(breakerSt);
+                        // Dbpos: 1=off (OPEN), 2=on (CLOSED)
+                        open = (dp == 1);
+                    } else if (MmsValue_getType(breakerSt) == MMS_BOOLEAN) {
+                        open = MmsValue_getBoolean(breakerSt);
+                    }
+                    hmiData.breakerStatus = open;
                     MmsValue_delete(breakerSt);
                 }
                 IedConnection_close(breakerCon);
@@ -479,7 +493,7 @@ int main(int argc, char** argv) {
                 switch(cmd) {
                     case 't': {
                         printf("\n>>> MMS CONTROL: Manual Trip Command <<<\n");
-                        ControlObjectClient control = ControlObjectClient_create("simpleIOGenericIO/GGIO1.SPCSO1", con);
+                        ControlObjectClient control = ControlObjectClient_create("simpleIOGenericIO/CSWI1.Op", con);
                         if (control) {
                             MmsValue* ctlVal = MmsValue_newBoolean(true);
                             ControlObjectClient_operate(control, ctlVal, 0);
@@ -494,10 +508,12 @@ int main(int argc, char** argv) {
                         // Connect to circuit breaker MMS server for close command
                         IedConnection breakerCon = IedConnection_create();
                         IedClientError breakerError;
-                        IedConnection_connect(breakerCon, &breakerError, "circuit_breaker_ied", 103);
+                        const char* brHost = getenv("BREAKER_HOST"); if (!brHost) brHost = "circuit_breaker_ied";
+                        int brPort = 103; const char* brPortEnv = getenv("BREAKER_PORT"); if (brPortEnv) brPort = atoi(brPortEnv);
+                        IedConnection_connect(breakerCon, &breakerError, brHost, brPort);
                         
                         if (breakerError == IED_ERROR_OK) {
-                            ControlObjectClient control = ControlObjectClient_create("simpleIOGenericIO/GGIO1.SPCSO2", breakerCon);
+                            ControlObjectClient control = ControlObjectClient_create("simpleIOGenericIO/CSWI1.Op", breakerCon);
                             if (control) {
                                 MmsValue* ctlVal = MmsValue_newBoolean(false);
                                 ControlObjectClient_operate(control, ctlVal, 0);

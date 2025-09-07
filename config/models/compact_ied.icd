@@ -6,7 +6,7 @@
     <AccessPoint name="AP1">
       <Server>
         <LDevice inst="LD0">
-          <LN0 lnClass="LLN0" inst="">
+          <LN0 lnClass="LLN0" inst="" lnType="LLN0_type">
             <DataSet name="Events">
               <FCDA ldInst="LD0" lnClass="PTRC" lnInst="1" doName="Tr" daName="stVal" fc="ST"/>
               <FCDA ldInst="LD0" lnClass="XCBR" lnInst="1" doName="Pos" daName="stVal" fc="ST"/>
@@ -72,6 +72,9 @@
   </Communication>
 
   <DataTypeTemplates>
+    <LNodeType id="LLN0_type" lnClass="LLN0">
+      <!-- Minimal LLN0 type for generator compliance -->
+    </LNodeType>
     <LNodeType id="MMXU1" lnClass="MMXU">
       <DO name="PhV" type="MV1"/>
       <DO name="Amp" type="MV1"/>
@@ -116,4 +119,3 @@
     </DAType>
   </DataTypeTemplates>
 </SCL>
-

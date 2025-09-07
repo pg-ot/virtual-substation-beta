@@ -94,11 +94,16 @@ cd libiec61850/tools/model_generator
 ./gradlew build    # or: ./gradlew jar
 cd -
 ```
-2) Re-run build, which will auto-generate `src/static_model.c/.h` from the ICD:
+2) Generate relay/breaker models and place them under `gen/`:
 ```bash
-./build.sh
+./scripts/generate_models.sh
 ```
-If the generator isn’t available, the build uses the existing static model.
+
+3) Build images; Dockerfiles will pick up generated models if present:
+```bash
+docker-compose build
+```
+If the generator isn’t available, images use the existing static model.
 
 ## Step 11: Start System
 ```bash

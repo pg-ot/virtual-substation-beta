@@ -3,22 +3,48 @@ FROM ubuntu:20.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    cmake \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    APT_ARGS="-o Acquire::Retries=5 -o Acquire::http::Timeout=30"; \
+    for i in 1 2 3; do \
+      apt-get update $APT_ARGS && \
+      apt-get install $APT_ARGS -y --no-install-recommends \
+        ca-certificates \
+        build-essential \
+        cmake \
+        git \
+        openjdk-11-jre-headless \
+      && rm -rf /var/lib/apt/lists/* && break || { echo "APT attempt $i failed; retrying..."; sleep 5; }; \
+    done
 
 WORKDIR /app
 COPY libiec61850 ./libiec61850
 COPY src/circuit-breaker.c ./
 COPY src/static_model.h ./
 COPY src/static_model.c ./
+COPY config/models ./config/models
 
 RUN cd libiec61850 && \
     mkdir build && cd build && \
     cmake .. && \
     make
+
+# Optionally generate static model from SCL (disabled by default)
+ARG GENERATE_SCL=0
+ARG ICD_PATH=config/models/ln_breaker.icd
+RUN if [ "$GENERATE_SCL" = "1" ]; then \
+      echo "[GENMODEL] ICD_PATH=$ICD_PATH" && \
+      if [ ! -f libiec61850/tools/model_generator/genmodel.jar ]; then \
+        echo "ERROR: genmodel.jar not found" >&2; exit 1; \
+      fi && \
+      if [ ! -f "$ICD_PATH" ]; then \
+        echo "ERROR: ICD file not found at $ICD_PATH" >&2; exit 1; \
+      fi && \
+      echo "Generating breaker static model from ICD..." && \
+      java -jar libiec61850/tools/model_generator/genmodel.jar "$ICD_PATH" && \
+      echo "[GENMODEL] Done: static_model.c/.h regenerated"; \
+    else \
+      echo "[GENMODEL] Disabled; using bundled static_model.c/.h"; \
+    fi
 
 RUN gcc -o circuit-breaker circuit-breaker.c static_model.c \
     -I./libiec61850/src/iec61850/inc \

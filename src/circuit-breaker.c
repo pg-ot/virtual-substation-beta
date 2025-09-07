@@ -95,22 +95,23 @@ static void* http_status_thread(void* arg) {
             // Status JSON
             pthread_mutex_lock(&breaker_mutex);
             uint64_t now = Hal_getTimeInMs();
-            bool rx_ok = (last_goose_ms != 0) && ((now - last_goose_ms) < 3000);
+            bool rx_ok = (last_goose_ms != 0) && ((now - last_goose_ms) < 5000);
             static uint32_t br_tx_count = 0; // total publishes
             static uint64_t br_last_tx_ms = 0;
             // Note: updated in publishBreakerStatus via externs below
             const char* json_fmt =
-                "{\"stNum\":%u,\"sqNum\":%u,\"messageCount\":%u,\"lastTime\":\"%s\",\"breakerOpen\":%s,\"tripReceived\":%s,\"rxOk\":%s,\"lastRxMs\":%llu,\"txCount\":%u,\"lastTxMs\":%llu,\"txOk\":%s}";
+                "{\"stNum\":%u,\"sqNum\":%u,\"messageCount\":%u,\"lastTime\":\"%s\",\"breakerOpen\":%s,\"position\":\"%s\",\"tripReceived\":%s,\"rxOk\":%s,\"lastRxMs\":%llu,\"txCount\":%u,\"lastTxMs\":%llu,\"txOk\":%s}";
             char body[512];
             snprintf(body, sizeof(body), json_fmt,
                      last_stnum, last_sqnum, goose_msg_count, last_goose_time,
                      breaker_open ? "true" : "false",
+                     breaker_open ? "OPEN" : "CLOSED",
                      trip_received ? "true" : "false",
                      rx_ok ? "true" : "false",
                      (unsigned long long) last_goose_ms,
                      br_tx_count,
                      (unsigned long long) br_last_tx_ms,
-                     ((br_last_tx_ms != 0) && ((now - br_last_tx_ms) < 3000)) ? "true" : "false");
+                     ((br_last_tx_ms != 0) && ((now - br_last_tx_ms) < 5000)) ? "true" : "false");
             pthread_mutex_unlock(&breaker_mutex);
             snprintf(response, sizeof(response),
                      "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\n\r\n%s",
@@ -176,8 +177,8 @@ void publishBreakerStatus(bool is_state_change) {
     }
     
     LinkedList dataSetValues = LinkedList_create();
+    // LN-based BrkStatus dataset contains only XCBR1.Pos.stVal (boolean)
     LinkedList_add(dataSetValues, MmsValue_newBoolean(breaker_open));
-    LinkedList_add(dataSetValues, MmsValue_newUtcTimeByMsTime(Hal_getTimeInMs()));
     
     if (is_state_change) {
         // IEC 61850-8-1: GOOSE burst - multiple rapid publishes
@@ -192,6 +193,18 @@ void publishBreakerStatus(bool is_state_change) {
     }
     
     LinkedList_destroyDeep(dataSetValues, (LinkedListValueDeleteFunction) MmsValue_delete);
+    
+    // Mirror position to MMS XCBR1.Pos (ST): stVal (Dbpos)/q/t
+    if (iedServer) {
+        IedServer_lockDataModel(iedServer);
+        // Dbpos: OFF(1)=OPEN, ON(2)=CLOSED
+        IedServer_updateDbposValue(iedServer, IEDMODEL_GenericIO_XCBR1_Pos_stVal,
+                                   breaker_open ? DBPOS_OFF : DBPOS_ON);
+        Quality q = 0; Quality_setValidity(&q, QUALITY_VALIDITY_GOOD);
+        IedServer_updateQuality(iedServer, IEDMODEL_GenericIO_XCBR1_Pos_q, q);
+        IedServer_updateUTCTimeAttributeValue(iedServer, IEDMODEL_GenericIO_XCBR1_Pos_t, Hal_getTimeInMs());
+        IedServer_unlockDataModel(iedServer);
+    }
     // Update local TX supervision counters
     static uint32_t* p_tx_count = NULL;
     static uint64_t* p_last_tx_ms = NULL;
@@ -238,6 +251,8 @@ static void gooseListener(GooseSubscriber subscriber, void* parameter) {
     last_stnum = stNum;
     last_sqnum = sqNum;
     goose_msg_count++;
+    // Update RX supervision timestamp on every message
+    last_goose_ms = Hal_getTimeInMs();
     
     // Update timestamp
     time_t now = time(NULL);
@@ -250,16 +265,12 @@ static void gooseListener(GooseSubscriber subscriber, void* parameter) {
     
     MmsValue* values = GooseSubscriber_getDataSetValues(subscriber);
     
-    if (values && MmsValue_getArraySize(values) >= 8) {
+    if (values && MmsValue_getArraySize(values) >= 4) {
         // Parse GOOSE dataset
         MmsValue* tripSignal = MmsValue_getElement(values, 0);      // SPCSO1 - Trip Command
-        MmsValue* tripTime = MmsValue_getElement(values, 1);        // SPCSO1 timestamp
-        MmsValue* breakerPos = MmsValue_getElement(values, 2);      // SPCSO2 - Breaker Position
-        MmsValue* breakerTime = MmsValue_getElement(values, 3);     // SPCSO2 timestamp
-        MmsValue* faultDet = MmsValue_getElement(values, 4);        // SPCSO3 - Fault Detected
-        MmsValue* faultTime = MmsValue_getElement(values, 5);       // SPCSO3 timestamp
-        MmsValue* ocPickup = MmsValue_getElement(values, 6);        // SPCSO4 - OC Pickup
-        MmsValue* ocTime = MmsValue_getElement(values, 7);          // SPCSO4 timestamp
+        MmsValue* breakerPos = MmsValue_getElement(values, 1);      // SPCSO2 - Breaker Position
+        MmsValue* faultDet = MmsValue_getElement(values, 2);        // SPCSO3 - Fault Detected
+        MmsValue* ocPickup = MmsValue_getElement(values, 3);        // SPCSO4 - OC Pickup
         
         bool trip = (tripSignal && MmsValue_getType(tripSignal) == MMS_BOOLEAN) ? 
                    MmsValue_getBoolean(tripSignal) : false;
@@ -320,7 +331,7 @@ int main(int argc, char** argv) {
     
     uint8_t dstMac[6] = {0x01, 0x0c, 0xcd, 0x01, 0x00, 0x01};
     GooseSubscriber_setDstMac(subscriber, dstMac);
-    GooseSubscriber_setAppId(subscriber, 4096);
+    GooseSubscriber_setAppId(subscriber, 1000); // match ln_ied.icd APPID
     GooseSubscriber_setListener(subscriber, gooseListener, NULL);
     
     GooseReceiver_addSubscriber(receiver, subscriber);
@@ -357,7 +368,7 @@ int main(int argc, char** argv) {
     
     // Initialize GOOSE Publisher for status feedback (match protection relay pattern)
     CommParameters statusCommParameters;
-    statusCommParameters.appId = 4097;  // Different AppId
+    statusCommParameters.appId = 1001;  // Match ln_breaker.icd APPID
     statusCommParameters.dstAddress[0] = 0x01;
     statusCommParameters.dstAddress[1] = 0x0c;
     statusCommParameters.dstAddress[2] = 0xcd;
@@ -370,10 +381,10 @@ int main(int argc, char** argv) {
     statusPublisher = GoosePublisher_create(&statusCommParameters, "eth0");
     if (statusPublisher) {
         printf("✅ GOOSE Status Publisher created on eth0\n");
-        GoosePublisher_setGoCbRef(statusPublisher, "circuitBreakerIO/LLN0$GO$gcbStatus");
-        GoosePublisher_setDataSetRef(statusPublisher, "circuitBreakerIO/LLN0$statusDataset");
+        GoosePublisher_setGoCbRef(statusPublisher, "LD0/LLN0$GO$gcbStatus");
+        GoosePublisher_setDataSetRef(statusPublisher, "LD0$BrkStatus");
         GoosePublisher_setConfRev(statusPublisher, 1);
-        GoosePublisher_setTimeAllowedToLive(statusPublisher, 3000);
+        GoosePublisher_setTimeAllowedToLive(statusPublisher, 5000);
         printf("✅ GOOSE Status Publisher initialized on eth0\n");
     } else {
         printf("❌ GOOSE Status Publisher failed on eth0\n");
@@ -384,8 +395,8 @@ int main(int argc, char** argv) {
     iedServer = IedServer_createWithConfig(&iedModel, NULL, config);
     IedServerConfig_destroy(config);
     
-    // Install control handler for SPCSO2 (breaker close)
-    IedServer_setControlHandler(iedServer, IEDMODEL_GenericIO_GGIO1_SPCSO2, 
+    // Install control handler for CSWI1.Op (breaker open/close)
+    IedServer_setControlHandler(iedServer, IEDMODEL_GenericIO_CSWI1_Op, 
                                (ControlHandler) controlHandler, NULL);
     
     // Start MMS server on different port to avoid conflict
@@ -413,24 +424,20 @@ int main(int argc, char** argv) {
     while (running) {
         // Heartbeat every 3 seconds
         heartbeat_counter++;
-        if (heartbeat_counter >= 30) {
+        if (heartbeat_counter >= 10) {
             publishBreakerStatus(false); // Heartbeat
             heartbeat_counter = 0;
         }
         
-        // Update simple GOOSE supervision (GGIO1.Ind1) every ~500ms
+        // Update simple GOOSE supervision every ~500ms (internal only)
         supervision_counter++;
         if (supervision_counter >= 5) {
             supervision_counter = 0;
             bool rx_ok = false;
             uint64_t now = Hal_getTimeInMs();
-            if (last_goose_ms != 0 && (now - last_goose_ms) < 3000) rx_ok = true; // within 3s
-
-            IedServer_lockDataModel(iedServer);
-            IedServer_updateBooleanAttributeValue(iedServer, IEDMODEL_GenericIO_GGIO1_Ind1_stVal, rx_ok);
-            Quality q = 0; Quality_setValidity(&q, QUALITY_VALIDITY_GOOD);
-            IedServer_updateQuality(iedServer, IEDMODEL_GenericIO_GGIO1_Ind1_q, q);
-            IedServer_unlockDataModel(iedServer);
+            if (last_goose_ms != 0 && (now - last_goose_ms) < 5000) rx_ok = true; // within 5s
+            // Optionally expose rx_ok via an LN attribute if needed (e.g., LPHD1.Proxy)
+            // Currently, we keep it internal and serve via HTTP diagnostics only.
         }
         
         Thread_sleep(100); // 100ms sleep

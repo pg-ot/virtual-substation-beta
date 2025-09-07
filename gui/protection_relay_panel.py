@@ -169,10 +169,25 @@ class ProtectionRelayPanel:
             print(f"GUI: Failed to send trip command: {e}")
 
     def reset_trip(self):
-        print("GUI: Reset Trip button is not implemented yet.")
+        try:
+            r = requests.post('http://localhost:8082/reset', timeout=2)
+            if r.status_code == 200:
+                self.log_text.insert(1.0, "RESET: Trip reset command sent to relay\n")
+            else:
+                self.log_text.insert(1.0, f"RESET FAILED: HTTP {r.status_code}\n")
+        except Exception as e:
+            self.log_text.insert(1.0, f"RESET ERROR: {str(e)}\n")
 
     def reset_relay(self):
-        print("GUI: Reset Alarms button is not implemented yet.")
+        # Alias to same /reset for now
+        try:
+            r = requests.post('http://localhost:8082/reset', timeout=2)
+            if r.status_code == 200:
+                self.log_text.insert(1.0, "ALARM RESET: Command sent to relay\n")
+            else:
+                self.log_text.insert(1.0, f"ALARM RESET FAILED: HTTP {r.status_code}\n")
+        except Exception as e:
+            self.log_text.insert(1.0, f"ALARM RESET ERROR: {str(e)}\n")
     
     def debug_test(self):
         try:

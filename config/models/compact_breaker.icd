@@ -6,7 +6,7 @@
     <AccessPoint name="AP1">
       <Server>
         <LDevice inst="LD0">
-          <LN0 lnClass="LLN0" inst="">
+          <LN0 lnClass="LLN0" inst="" lnType="LLN0_type">
             <!-- DataSets -->
             <DataSet name="BrkStatus">
               <FCDA ldInst="LD0" lnClass="XCBR" lnInst="1" doName="Pos" daName="stVal" fc="ST"/>
@@ -72,6 +72,9 @@
   </Communication>
 
   <DataTypeTemplates>
+    <LNodeType id="LLN0_type" lnClass="LLN0">
+      <!-- Minimal LLN0 type for generator compliance -->
+    </LNodeType>
     <!-- XCBR and CSWI types (compact) -->
     <LNodeType id="XCBR1" lnClass="XCBR">
       <DO name="Pos" type="DPC1"/>
@@ -92,4 +95,3 @@
     </DOType>
   </DataTypeTemplates>
 </SCL>
-

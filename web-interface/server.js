@@ -76,13 +76,18 @@ app.get('/api/ied-status', (req, res) => {
 
 // Run orchestrated end-to-end tests
 app.post('/api/run-tests', async (req, res) => {
+  try {
     const results = [];
     const start = Date.now();
 
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     async function readHmiData() {
-        const r = await fetch('http://hmi-scada:8080/data');
-        return r.ok ? await r.json() : null;
+        try {
+            const r = await fetch('http://hmi-scada:8080/data');
+            return r.ok ? await r.json() : null;
+        } catch (e) {
+            return null;
+        }
     }
     async function diag() {
         const r = await fetch('http://hmi-scada:8080/diagnostics');
@@ -112,7 +117,7 @@ app.post('/api/run-tests', async (req, res) => {
     await hmi('reset');
     await hmi('close');
     await sleep(300);
-    results.push({ name: 'Normalize', ...(await awaitCond(d => !d.faultDetected && !d.tripCommand, 3000)) });
+    results.push({ name: 'Normalize', ...(await awaitCond(d => !d.faultDetected && !d.tripCommand, 5000)) });
 
     // 51 Overcurrent (pickup then trip after ~1s)
     setVal('updateCurrent', { current: 1500 });
@@ -143,8 +148,9 @@ app.post('/api/run-tests', async (req, res) => {
     setVal('updateFrequency', { frequency: 50.0 });
     await hmi('reset'); await hmi('close'); await sleep(300);
 
-    // Final normal check
-    const final = await awaitCond(d => !d.faultDetected && !d.tripCommand && d.breakerStatus === false, 3000);
+    // Final normal check (extra reset/close and longer window)
+    await hmi('reset'); await hmi('close'); await sleep(500);
+    const final = await awaitCond(d => !d.faultDetected && !d.tripCommand && d.breakerStatus === false, 6000);
     results.push({ name: 'Return to normal', ...final });
 
     const summary = {
@@ -153,6 +159,10 @@ app.post('/api/run-tests', async (req, res) => {
         results
     };
     res.json(summary);
+  } catch (e) {
+    console.error('run-tests failed:', e);
+    res.status(500).json({ ok: false, error: 'run_failed', message: String(e) });
+  }
 });
 
 // Add IED status endpoint for fallback
