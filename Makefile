@@ -35,6 +35,7 @@ build:
 # Start complete system
 start:
 	@echo "Starting Virtual Substation system..."
+	@docker network prune -f
 	@./scripts/start_all.sh
 
 # Build without cache and start all services
