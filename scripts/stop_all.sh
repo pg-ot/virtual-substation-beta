@@ -35,7 +35,7 @@ pkill -f "python3.*_panel.py" 2>/dev/null
 
 # Stop Docker containers
 echo "📦 Stopping Docker containers..."
-docker-compose down
+docker compose down
 
 echo ""
 echo "✅ Virtual Substation System Stopped!"

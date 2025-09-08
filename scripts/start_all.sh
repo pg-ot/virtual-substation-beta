@@ -6,7 +6,7 @@ echo "🚀 Starting Virtual Substation System..."
 
 # Start Docker containers
 echo "📦 Starting Docker containers..."
-docker-compose up -d
+docker compose up -d
 
 # Configure GOOSE multicast on bridge networks
 echo "🔧 Configuring GOOSE multicast..."
