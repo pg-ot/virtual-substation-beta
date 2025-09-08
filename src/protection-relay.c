@@ -107,11 +107,12 @@ typedef struct {
     int overcurrent_pickup;
     int ground_fault_pickup;
     int trip_active;
+    int manual_trip;  // Flag to indicate manual trip (prevents auto-reset)
     char trip_reason[64];
     uint64_t pickup_time;
 } ProtectionState;
 
-static ProtectionState prot_state = {0, 0, 0, "Normal", 0};
+static ProtectionState prot_state = {0, 0, 0, 0, "Normal", 0};
 static SimulationData simData = {132.0, 450.0, 50.0, 0.0};
 static volatile bool g_breaker_status_from_goose = false;
 // RX supervision for breaker status GOOSE (received by relay)
@@ -376,6 +377,7 @@ int main(int argc, char** argv) {
                 printf(">>> 50 INSTANTANEOUS O/C: %.0fA - TRIP\n", simData.current);
                 strcpy(prot_state.trip_reason, "50-Instantaneous O/C");
                 prot_state.trip_active = 1;
+                prot_state.manual_trip = 0;  // Automatic trip, not manual
                 trip_issued = 1;
             }
         } else if (simData.current >= 1000) {
@@ -387,6 +389,7 @@ int main(int argc, char** argv) {
                 printf(">>> 51 TIME O/C TRIP: 1.0s expired - TRIP\n");
                 strcpy(prot_state.trip_reason, "51-Time O/C");
                 prot_state.trip_active = 1;
+                prot_state.manual_trip = 0;  // Automatic trip, not manual
                 trip_issued = 1;
             }
         }
@@ -396,6 +399,7 @@ int main(int argc, char** argv) {
                 printf(">>> 50G INSTANTANEOUS GF: %.0fA - TRIP\n", simData.faultCurrent);
                 strcpy(prot_state.trip_reason, "50G-Instantaneous GF");
                 prot_state.trip_active = 1;
+                prot_state.manual_trip = 0;  // Automatic trip, not manual
                 trip_issued = 1;
             }
         } else if (simData.faultCurrent >= 300) {
@@ -407,6 +411,7 @@ int main(int argc, char** argv) {
                 printf(">>> 51G TIME GF TRIP: 0.5s expired - TRIP\n");
                 strcpy(prot_state.trip_reason, "51G-Time GF");
                 prot_state.trip_active = 1;
+                prot_state.manual_trip = 0;  // Automatic trip, not manual
                 trip_issued = 1;
             }
         }
@@ -416,11 +421,13 @@ int main(int argc, char** argv) {
                 printf(">>> 81U UNDERFREQUENCY: %.3fHz - TRIP\n", simData.frequency);
                 strcpy(prot_state.trip_reason, "81U-Underfrequency");
                 prot_state.trip_active = 1;
+                prot_state.manual_trip = 0;  // Automatic trip, not manual
                 trip_issued = 1;
             }
         }
         
-        if (prot_state.trip_active && g_breaker_status_from_goose) {
+        // Only auto-reset for protection trips, not manual trips
+        if (prot_state.trip_active && g_breaker_status_from_goose && !prot_state.manual_trip) {
             printf(">>> TRIP RESET - Breaker opened (GOOSE feedback)\n");
             prot_state.trip_active = 0;
             strcpy(prot_state.trip_reason, "Normal");
@@ -512,12 +519,14 @@ int main(int argc, char** argv) {
 // Helper implementations
 static void relay_latch_trip(const char* reason) {
     prot_state.trip_active = 1;
+    prot_state.manual_trip = 1;  // Set manual trip flag
     if (reason && reason[0]) strcpy(prot_state.trip_reason, reason);
     publishGooseMessage(true);
 }
 
 static void relay_reset_trip(void) {
     prot_state.trip_active = 0;
+    prot_state.manual_trip = 0;  // Clear manual trip flag
     prot_state.overcurrent_pickup = 0;
     prot_state.ground_fault_pickup = 0;
     prot_state.pickup_time = 0;

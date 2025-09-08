@@ -38,3 +38,6 @@ __pycache__/
 
 # Generated SCL files (optional - uncomment if you want to regenerate)
 # config/models/generated_*.icd
+
+# Archive folder
+archive/

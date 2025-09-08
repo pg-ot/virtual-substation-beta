@@ -216,7 +216,15 @@ void* http_server_thread(void* arg) {
                 // Read breaker position via MMS
                 MmsValue* breakerPos = IedConnection_readObject(testBreaker, &breakerError, REF_XCBR_POS, IEC61850_FC_ST);
                 if (breakerPos) {
-                    hmiData.breakerStatus = MmsValue_getBoolean(breakerPos);
+                    bool open = false;
+                    if (MmsValue_getType(breakerPos) == MMS_INTEGER) {
+                        int32_t dp = MmsValue_toInt32(breakerPos);
+                        // Dbpos: DBPOS_OFF(1)=OPEN, DBPOS_ON(2)=CLOSED
+                        open = (dp == 1);
+                    } else if (MmsValue_getType(breakerPos) == MMS_BOOLEAN) {
+                        open = MmsValue_getBoolean(breakerPos);
+                    }
+                    hmiData.breakerStatus = open;
                     MmsValue_delete(breakerPos);
                 }
                 // GOOSE supervision is now tracked internally by breaker and via HTTP; skip MMS read here.

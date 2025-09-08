@@ -7,109 +7,258 @@
 - **macOS**: 10.15+ with Docker Desktop
 - **Windows**: WSL2 with Docker Desktop
 
-### Software Dependencies
+### Hardware Requirements
+- **RAM**: 4GB minimum, 8GB recommended
+- **Storage**: 2GB free space
+- **Network**: Raw socket access for GOOSE (Linux containers need privileged mode)
+
+## Step-by-Step Installation
+
+### 1. Install Dependencies
+
+**Ubuntu/Debian:**
 ```bash
-# Ubuntu/Debian
 sudo apt update
-sudo apt install -y docker.io docker-compose python3-tk nodejs npm git
+sudo apt install -y docker.io docker-compose python3-tk nodejs npm git wget
 
-# macOS (with Homebrew)
-brew install docker docker-compose node python-tk
-
-# Enable Docker service (Linux)
+# Enable Docker service
 sudo systemctl enable docker
 sudo systemctl start docker
 sudo usermod -aG docker $USER
 newgrp docker
 ```
 
-### Hardware Requirements
-- **RAM**: 4GB minimum, 8GB recommended
-- **Storage**: 2GB free space
-- **Network**: Raw socket access for GOOSE (Linux containers need privileged mode)
-
-## Quick Installation
-
-### 1. Clone Repository
+**macOS (with Homebrew):**
 ```bash
-git clone <repository-url>
-cd "Virtual Substation/Cirtual Substation (30082025)"
+brew install docker docker-compose node python-tk git wget
 ```
 
-### 2. Install Web Dependencies
+**Windows:**
+- Install Docker Desktop
+- Install WSL2 with Ubuntu
+- Run commands in WSL2 terminal
+
+### 2. Download Project
+
+**Option A: Git Clone (Recommended)**
 ```bash
+git clone https://github.com/YOUR_USERNAME/virtual-substation.git
+cd virtual-substation
+```
+
+**Option B: Download ZIP**
+```bash
+wget https://github.com/YOUR_USERNAME/virtual-substation/archive/refs/heads/main.zip
+unzip main.zip
+cd virtual-substation-main
+```
+
+**Option C: Direct Download**
+```bash
+# Download and extract in one command
+wget -O - https://github.com/YOUR_USERNAME/virtual-substation/archive/refs/heads/main.tar.gz | tar -xz
+cd virtual-substation-main
+```
+
+### 3. Setup Project
+```bash
+# Install web interface dependencies
 cd web-interface
 npm install
 cd ..
+
+# Make scripts executable
+chmod +x scripts/*.sh
 ```
 
-### 3. Build and Start System
+### 4. Build and Start
 ```bash
-# Build all containers
+# Build all containers (takes 5-10 minutes)
 make build
 
 # Start the system
 make start
 
-# Launch GUI panels
+# Wait 30 seconds for containers to initialize
+sleep 30
+```
+
+### 5. Launch Interface
+```bash
+# Launch GUI panels (optional)
 make gui
 ```
 
-### 4. Verify Installation
-- **Web Interface**: http://localhost:3000
+### 6. Verify Installation
+Open these URLs in your browser:
+- **Main Interface**: http://localhost:3000
 - **HMI/SCADA**: http://localhost:8080
-- **Protection Relay API**: http://localhost:8082
-- **Circuit Breaker API**: http://localhost:8081
+- **Protection Relay**: http://localhost:8082
+- **Circuit Breaker**: http://localhost:8081
+
+**Success indicators:**
+- All 4 URLs respond
+- Web interface shows system diagram
+- GUI panels open (if launched)
+- No error messages in terminal
+
+## Quick Test
+
+```bash
+# Run automated test
+make test-goose
+
+# Expected output:
+# ✅ GOOSE communication working
+# ✅ Protection relay responding
+# ✅ Circuit breaker responding
+# ✅ All tests passed
+```
 
 ## Troubleshooting
 
-### Docker Permission Issues
+### Common Issues
+
+**1. Docker Permission Denied**
 ```bash
 sudo usermod -aG docker $USER
 newgrp docker
+# Then restart terminal
 ```
 
-### GOOSE Communication Issues
+**2. Containers Won't Start**
 ```bash
-# Verify privileged containers are running
-docker ps --format "table {{.Names}}\t{{.Status}}"
+# Check Docker status
+sudo systemctl status docker
 
-# Check container capabilities
-docker inspect protection_relay_ied_ln | grep -i cap
+# Restart Docker
+sudo systemctl restart docker
+
+# Clean and rebuild
+make clean
+make build
 ```
 
-### GUI Panel Issues
+**3. Port Already in Use**
 ```bash
-# Install Tkinter (Ubuntu/Debian)
+# Find what's using the ports
+sudo netstat -tulpn | grep -E ':(3000|8080|8081|8082)'
+
+# Stop the system
+make stop
+
+# Kill processes if needed
+sudo pkill -f "node.*3000"
+```
+
+**4. GUI Panels Won't Open**
+```bash
+# Install Tkinter
 sudo apt install python3-tk
 
-# Check display variable
+# Check display
 echo $DISPLAY
+
+# For SSH connections
+ssh -X username@hostname
 ```
 
-### Port Conflicts
+**5. Web Interface Not Loading**
 ```bash
-# Check if ports are in use
-netstat -tulpn | grep -E ':(3000|8080|8081|8082|102|103)'
+# Check container logs
+docker logs substation_web_ui
 
-# Stop conflicting services
-make stop
+# Restart web interface
+docker restart substation_web_ui
+
+# Wait and try again
+sleep 10
+curl http://localhost:3000
 ```
+
+### Getting Help
+
+**Check System Status:**
+```bash
+# View all containers
+docker ps -a
+
+# Check logs
+docker logs protection_relay_ied
+docker logs circuit_breaker_ied
+```
+
+**Reset Everything:**
+```bash
+make stop
+make clean
+make build
+make start
+```
+
+## Next Steps
+
+### 1. Run Demo
+```bash
+# Automated demonstration
+make demo
+```
+
+### 2. Manual Testing
+```bash
+# Launch GUI panels
+make gui
+
+# Test protection functions:
+# - Open Simulation Control Panel
+# - Set Current > 1000A
+# - Watch circuit breaker trip
+```
+
+### 3. Learn More
+- Read `ARCHITECTURE.md` for technical details
+- Check `README.md` for usage examples
+- See `docs/TRAINING.md` for learning exercises
 
 ## Advanced Configuration
 
-### Environment Variables
-- `SIMULATOR_HOST`: Web interface hostname (default: substation_web_ui)
-- `RELAY_HOST`: Protection relay hostname (default: protection_relay_ied_ln)
-- `BREAKER_HOST`: Circuit breaker hostname (default: circuit_breaker_ied_ln)
-- `TEST_MODE`: Enable test quality flags (default: false)
+### Production Deployment
+```bash
+# Secure production mode
+make start-secure
+
+# System monitoring
+make monitor
+```
+
+### Development Mode
+```bash
+# Development setup
+make dev-setup
+
+# Run tests
+make ci-test
+```
 
 ### Network Configuration
 The system uses two Docker networks:
 - **Process Bus** (192.168.10.0/24): GOOSE communication
 - **Station Bus** (192.168.20.0/24): MMS communication
 
-### ICD Models
-The system uses IEC 61850 ICD files for data model generation:
-- `config/models/ln_ied.icd` - Protection relay model
-- `config/models/ln_breaker.icd` - Circuit breaker model
+### Environment Variables
+- `SIMULATOR_HOST`: Web interface hostname
+- `RELAY_HOST`: Protection relay hostname  
+- `BREAKER_HOST`: Circuit breaker hostname
+- `TEST_MODE`: Enable test quality flags
+
+---
+
+**Installation Complete!** 🎉
+
+Your Virtual Substation Training System is ready to use.
+
+**Quick Links:**
+- Main Interface: http://localhost:3000
+- Documentation: `README.md`
+- Architecture: `ARCHITECTURE.md`
+- Training Guide: `docs/TRAINING.md`

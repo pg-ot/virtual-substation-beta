@@ -42,7 +42,7 @@
 ## Current Clean Project Structure
 
 ```
-Cirtual Substation/
+Virtual Substation/
 ├── gui/                    # Training interface panels
 ├── libiec61850/           # IEC 61850 protocol library
 ├── src/                   # Core IED source code

@@ -97,7 +97,7 @@ sudo apt install docker.io docker-compose python3-tk nodejs npm
 ### **1. Clone Repository**
 ```bash
 git clone <repository-url>
-cd "Virtual Substation/Cirtual Substation (30082025)"
+cd "Virtual Substation/Virtual Substation (30082025)"
 ```
 
 ### **2. Build System**

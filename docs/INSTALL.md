@@ -50,7 +50,7 @@ sudo apt install -y nodejs npm
 ```bash
 # If using git
 git clone <repository-url>
-cd "Virtual Substation/Cirtual Substation"
+cd "Virtual Substation/Virtual Substation"
 
 # Or copy project files to desired directory
 ```
