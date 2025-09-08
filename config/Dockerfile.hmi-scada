@@ -3,6 +3,7 @@ FROM ubuntu:20.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
+# Install dependencies
 RUN set -eux; \
     APT_ARGS="-o Acquire::Retries=5 -o Acquire::http::Timeout=30"; \
     for i in 1 2 3; do \
@@ -16,26 +17,30 @@ RUN set -eux; \
     done
 
 WORKDIR /app
+
+# Copy libiec61850 library
 COPY libiec61850 ./libiec61850
-COPY src/hmi-scada.c ./hmi-scada.c
-COPY src/static_model.c ./
-COPY src/static_model.h ./
+
+# Copy HMI source code
+COPY src/hmi-scada.c ./
 COPY src/model_alias.h ./
 
+# Build libiec61850
 RUN cd libiec61850 && \
-    mkdir -p build && cd build && \
+    mkdir build && cd build && \
     cmake .. && \
     make
 
-RUN gcc -o hmi-scada hmi-scada.c static_model.c \
+# Compile HMI/SCADA client
+RUN gcc -o hmi-scada hmi-scada.c \
     -I./libiec61850/src/iec61850/inc \
     -I./libiec61850/src/common/inc \
     -I./libiec61850/hal/inc \
     -I./libiec61850/src/mms/inc \
-    -I./libiec61850/src/r_session \
+    -I./libiec61850/src/goose \
     -I./libiec61850/src/logging \
     ./libiec61850/build/src/libiec61850.a \
     ./libiec61850/build/hal/libhal.a \
     -lpthread -lm
 
-CMD ["./hmi-scada", "protection_relay_ied"]
+CMD ["./hmi-scada"]

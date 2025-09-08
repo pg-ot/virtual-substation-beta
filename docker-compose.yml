@@ -1,10 +1,11 @@
 services:
+  # IEC 61850 Logical Node (LN) based services
   protection-relay:
     build:
       context: .
       dockerfile: config/Dockerfile.protection-relay
       args:
-        GENERATE_SCL: "1"
+        ICD_PATH: config/models/ln_ied.icd
     container_name: protection_relay_ied
     networks:
       - process_bus
@@ -22,19 +23,13 @@ services:
       - SIMULATOR_HOST=substation_web_ui
     volumes:
       - ./logs:/app/logs
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/102' || exit 1"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
 
   circuit-breaker:
     build:
       context: .
       dockerfile: config/Dockerfile.circuit-breaker
       args:
-        GENERATE_SCL: "1"
+        ICD_PATH: config/models/ln_breaker.icd
     container_name: circuit_breaker_ied
     networks:
       - process_bus
@@ -49,16 +44,8 @@ services:
     environment:
       - GOOSE_INTERFACE=eth0
     command: ["./circuit-breaker", "eth0"]
-    depends_on:
-      - protection-relay
     volumes:
       - ./logs:/app/logs
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/103' || exit 1"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
 
   hmi-scada:
     build:
@@ -76,86 +63,7 @@ services:
       - BREAKER_PORT=103
     depends_on:
       - protection-relay
-    volumes:
-      - ./logs:/app/logs
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080' || exit 1"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
-
-  # LN-only variants that always generate from ICD and never use GGIO fallback
-  protection-relay-ln:
-    build:
-      context: .
-      dockerfile: config/Dockerfile.protection-relay.ln
-      args:
-        ICD_PATH: config/models/ln_ied.icd
-    container_name: protection_relay_ied_ln
-    networks:
-      process_bus:
-        aliases:
-          - protection_relay_ied
-    ports:
-      - "102:102"
-      - "8082:8082"
-    privileged: true
-    cap_add:
-      - NET_RAW
-      - NET_ADMIN
-      - NET_BROADCAST
-    environment:
-      - GOOSE_INTERFACE=eth0
-      - MMS_PORT=102
-      - SIMULATOR_HOST=substation_web_ui
-    volumes:
-      - ./logs:/app/logs
-
-  circuit-breaker-ln:
-    build:
-      context: .
-      dockerfile: config/Dockerfile.circuit-breaker.ln
-      args:
-        ICD_PATH: config/models/ln_breaker.icd
-    container_name: circuit_breaker_ied_ln
-    networks:
-      process_bus:
-        aliases:
-          - circuit_breaker_ied
-    ports:
-      - "8081:8081"
-      - "103:103"
-    privileged: true
-    cap_add:
-      - NET_RAW
-      - NET_ADMIN
-      - NET_BROADCAST
-    environment:
-      - GOOSE_INTERFACE=eth0
-    command: ["./circuit-breaker", "eth0"]
-    volumes:
-      - ./logs:/app/logs
-
-  hmi-scada-ln:
-    build:
-      context: .
-      dockerfile: config/Dockerfile.hmi-scada
-    container_name: hmi_scada_ln
-    networks:
-      process_bus:
-        aliases:
-          - hmi-scada
-    ports:
-      - "8080:8080"
-    environment:
-      - RELAY_HOST=protection_relay_ied_ln
-      - MMS_PORT=102
-      - BREAKER_HOST=circuit_breaker_ied_ln
-      - BREAKER_PORT=103
-    depends_on:
-      - protection-relay-ln
-      - circuit-breaker-ln
+      - circuit-breaker
     volumes:
       - ./logs:/app/logs
 

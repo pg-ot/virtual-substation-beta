@@ -1,34 +1,40 @@
 # Build artifacts
-*.tar
 *.o
-*.so
 *.a
-*.exe
+*.so
+static_model.c
+static_model.h
 
-# Docker volumes
-docker-volumes/
+# Docker
+.docker/
 
 # Logs
-*.log
-logs/
-
-# Temporary files
-*.tmp
-*.temp
-*~
+logs/*.log
+logs/*.txt
 
 # IDE files
 .vscode/
 .idea/
+*.swp
+*.swo
 
 # OS files
 .DS_Store
 Thumbs.db
 
-# Network captures
-*.pcap
-*.pcapng
-
 # Node modules
-node_modules/
-npm-debug.log*
+web-interface/node_modules/
+web-interface/package-lock.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Temporary files
+/tmp/
+*.tmp
+*.pid
+
+# Generated SCL files (optional - uncomment if you want to regenerate)
+# config/models/generated_*.icd

@@ -1,0 +1,11 @@
+{
+  "name": "IEC 61850 Development",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "protection-relay",
+  "workspaceFolder": "/app",
+  "extensions": [
+    "ms-vscode.cpptools",
+    "ms-vscode.cmake-tools",
+    "ms-python.python"
+  ]
+}

@@ -311,9 +311,9 @@ int main(int argc, char** argv) {
         printf("❌ GOOSE Publisher failed on lo\n");
     }
     if (goosePublisher) {
-        GoosePublisher_setGoCbRef(goosePublisher, "simpleIOGenericIO/LLN0$GO$gcbEvents");
-        // Generator-friendly SCL DataSetRef: simpleIOGenericIO/LLN0$Events
-        GoosePublisher_setDataSetRef(goosePublisher, "simpleIOGenericIO/LLN0$Events");
+        GoosePublisher_setGoCbRef(goosePublisher, "GenericIO/LLN0$GO$gcbEvents");
+        // Generator-friendly SCL DataSetRef: GenericIO/LLN0$Events
+        GoosePublisher_setDataSetRef(goosePublisher, "GenericIO/LLN0$Events");
         GoosePublisher_setConfRev(goosePublisher, 1);
         GoosePublisher_setTimeAllowedToLive(goosePublisher, 5000);
         printf("✅ GOOSE Publisher initialized on eth0 (DataSet=LLN0$Events)\n");

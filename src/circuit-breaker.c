@@ -327,7 +327,7 @@ int main(int argc, char** argv) {
     printf(">>> GOOSE Receiver set to eth0\n");
     
     // Subscribe to Protection Relay GOOSE messages
-    GooseSubscriber subscriber = GooseSubscriber_create("simpleIOGenericIO/LLN0$GO$gcbEvents", NULL);
+    GooseSubscriber subscriber = GooseSubscriber_create("GenericIO/LLN0$GO$gcbEvents", NULL);
     
     uint8_t dstMac[6] = {0x01, 0x0c, 0xcd, 0x01, 0x00, 0x01};
     GooseSubscriber_setDstMac(subscriber, dstMac);
@@ -339,7 +339,7 @@ int main(int argc, char** argv) {
     
     // Add debug info before starting
     printf("DEBUG: Receiver created, interface set to eth0\n");
-    printf("DEBUG: Subscriber configured for GoCbRef: %s\n", "simpleIOGenericIO/LLN0$GO$gcbEvents");
+    printf("DEBUG: Subscriber configured for GoCbRef: %s\n", "GenericIO/LLN0$GO$gcbEvents");
     printf("DEBUG: AppId: %d, MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", 
            4096, dstMac[0], dstMac[1], dstMac[2], dstMac[3], dstMac[4], dstMac[5]);
     
@@ -356,7 +356,7 @@ int main(int argc, char** argv) {
     
     printf("🔍 GOOSE Receiver Debug Info:\n");
     printf("   Interface: eth0\n");
-    printf("   Subscriber GoCbRef: simpleIOGenericIO/LLN0$GO$gcbEvents\n");
+    printf("   Subscriber GoCbRef: GenericIO/LLN0$GO$gcbEvents\n");
     printf("   AppId: 4096\n");
     printf("   MAC: 01:0c:cd:01:00:01\n");
     printf("   Waiting for GOOSE messages...\n");
@@ -364,7 +364,7 @@ int main(int argc, char** argv) {
     printf("✅ GOOSE Subscriber active on eth0\n");
     printf("✅ Listening for Protection Relay messages\n");
     printf("DEBUG: Waiting for GOOSE messages from protection relay...\n");
-    printf("DEBUG: Expected publisher GoCbRef: simpleIOGenericIO/LLN0$GO$gcbEvents\n");
+    printf("DEBUG: Expected publisher GoCbRef: GenericIO/LLN0$GO$gcbEvents\n");
     
     // Initialize GOOSE Publisher for status feedback (match protection relay pattern)
     CommParameters statusCommParameters;
