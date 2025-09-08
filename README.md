@@ -9,34 +9,18 @@ A containerized IEC 61850 protocol demonstration system implementing basic subst
 
 ## 🚀 Quick Start
 
-### **First Time Setup (Install Docker)**
 ```bash
-# Install Docker (Ubuntu/Debian)
-sudo apt update
-sudo apt install -y docker.io docker-compose
-sudo usermod -aG docker $USER
-sudo systemctl start docker
-sudo systemctl enable docker
+# 1. First time setup (installs Docker + dependencies)
+make dev-setup
 
-# Log out and back in, then:
-newgrp docker
-```
-
-### **Run Virtual Substation**
-```bash
-# Build containers
+# 2. Build and start system
 make build
-
-# Start system
 make start
 
-# Test GOOSE communication
+# 3. Test GOOSE communication
 make test-goose
 
-# Run automated demo
-make demo
-
-# Launch GUI panels
+# 4. Launch GUI panels
 make gui
 ```
 
@@ -110,21 +94,18 @@ sudo apt install docker.io docker-compose python3-tk nodejs npm
 
 ### **1. Clone Repository**
 ```bash
-git clone <repository-url>
-cd "Virtual Substation/Virtual Substation (30082025)"
+git clone https://github.com/pg-ot/virtual-substation-beta.git
+cd virtual-substation-beta
 ```
 
-### **2. Build System**
+### **2. One-Time Setup**
 ```bash
-# Install web interface dependencies
-cd web-interface && npm install && cd ..
+make dev-setup
+```
 
-# Build Docker containers
+### **3. Build and Start**
+```bash
 make build
-```
-
-### **3. Start System**
-```bash
 make start
 ```
 
@@ -251,12 +232,8 @@ sudo tcpdump -i docker0 ether proto 0x88b8
 
 **Docker Not Found Error**
 ```bash
-# Install Docker first
-sudo apt update
-sudo apt install -y docker.io docker-compose
-sudo usermod -aG docker $USER
-sudo systemctl start docker
-newgrp docker
+# Run setup first
+make dev-setup
 ```
 
 **Containers Won't Start**
