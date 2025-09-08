@@ -9,6 +9,20 @@ A containerized IEC 61850 protocol demonstration system implementing basic subst
 
 ## 🚀 Quick Start
 
+### **First Time Setup (Install Docker)**
+```bash
+# Install Docker (Ubuntu/Debian)
+sudo apt update
+sudo apt install -y docker.io docker-compose
+sudo usermod -aG docker $USER
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# Log out and back in, then:
+newgrp docker
+```
+
+### **Run Virtual Substation**
 ```bash
 # Build containers
 make build
@@ -234,6 +248,16 @@ sudo tcpdump -i docker0 ether proto 0x88b8
 ## 🛑 Troubleshooting
 
 ### **Common Issues**
+
+**Docker Not Found Error**
+```bash
+# Install Docker first
+sudo apt update
+sudo apt install -y docker.io docker-compose
+sudo usermod -aG docker $USER
+sudo systemctl start docker
+newgrp docker
+```
 
 **Containers Won't Start**
 ```bash
