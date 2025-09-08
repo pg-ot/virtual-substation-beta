@@ -3,6 +3,9 @@
 
 echo "🔧 Setting up IEC 61850 Development Environment..."
 
+# Initialize git submodules
+git submodule update --init --recursive
+
 # Install development dependencies
 sudo apt update
 sudo apt install -y build-essential cmake git python3-tk nodejs npm jq curl docker.io docker-compose
