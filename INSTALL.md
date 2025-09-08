@@ -42,22 +42,22 @@ brew install docker docker-compose node python-tk git wget
 
 **Option A: Git Clone (Recommended)**
 ```bash
-git clone https://github.com/YOUR_USERNAME/virtual-substation.git
-cd virtual-substation
+git clone https://github.com/pg-ot/virtual-substation-beta.git
+cd virtual-substation-beta
 ```
 
 **Option B: Download ZIP**
 ```bash
-wget https://github.com/YOUR_USERNAME/virtual-substation/archive/refs/heads/main.zip
+wget https://github.com/pg-ot/virtual-substation-beta/archive/refs/heads/main.zip
 unzip main.zip
-cd virtual-substation-main
+cd virtual-substation-beta-main
 ```
 
 **Option C: Direct Download**
 ```bash
 # Download and extract in one command
-wget -O - https://github.com/YOUR_USERNAME/virtual-substation/archive/refs/heads/main.tar.gz | tar -xz
-cd virtual-substation-main
+wget -O - https://github.com/pg-ot/virtual-substation-beta/archive/refs/heads/main.tar.gz | tar -xz
+cd virtual-substation-beta-main
 ```
 
 ### 3. Setup Project
