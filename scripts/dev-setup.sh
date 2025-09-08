@@ -11,6 +11,7 @@ sudo apt install -y build-essential cmake git python3-tk nodejs npm jq curl dock
 sudo usermod -aG docker $USER
 sudo systemctl start docker
 sudo systemctl enable docker
+newgrp docker
 
 # Setup pre-commit hooks
 cat > .git/hooks/pre-commit << 'EOF'
@@ -28,5 +29,4 @@ alias vs-logs='docker-compose logs -f'
 EOF
 
 echo "✅ Development environment ready!"
-echo "⚠️  Log out and back in (or run 'newgrp docker') for Docker permissions"
 echo "Run: source ~/.bashrc"
